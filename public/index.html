@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>لوحة تحكم البوت</title>
+<style>
+  body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 14px; background: #f5f7fa; }
+  h2 { color: #1f3a5f; }
+  .box { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 12px; margin: 10px 0; }
+  .node { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 10px; margin: 8px 0; }
+  .children { margin-right: 18px; border-right: 3px solid #2e7dd7; padding-right: 10px; }
+  input, textarea { width: 100%; margin: 4px 0; padding: 8px; box-sizing: border-box; font-size: 15px; }
+  button { margin: 3px 2px; padding: 8px 12px; cursor: pointer; border: 0; border-radius: 6px; background: #2e7dd7; color: #fff; }
+  button.danger { background: #d9534f; }
+  button.ok { background: #28a745; font-size: 16px; }
+  .msg { padding: 8px; border-radius: 6px; margin: 8px 0; }
+  .err { background: #fdd; } .good { background: #dfd; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h2>لوحة تحكم البوت</h2>
+
+<!-- شاشة الدخول -->
+<div id="login" class="box">
+  <input id="u" placeholder="اسم المستخدم" autocomplete="username">
+  <input id="p" type="password" placeholder="الباسورد" autocomplete="current-password">
+  <button onclick="login()">دخول</button>
+  <div id="loginMsg"></div>
+</div>
+
+<!-- شاشة التحرير -->
+<div id="editor" class="hidden">
+  <div class="box">
+    <button class="ok" onclick="save()">💾 حفظ وتحديث البوت</button>
+    <button onclick="reload()">🔄 إعادة تحميل</button>
+    <div id="status"></div>
+  </div>
+  <div id="tree"></div>
+</div>
+
+<script>
+// الاتصال بالسيرفر: الباسورد بيتبعت مع كل طلب، ومش بيتخزن في أي مكان
+let creds = null;
+let data = null;
+
+async function api(action, content) {
+  const res = await fetch("/api/admin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...creds, action, content }),
+  });
+  const j = await res.json();
+  if (!res.ok) throw new Error(j.error || "خطأ");
+  return j;
+}
+
+function say(id, text, ok) {
+  const el = document.getElementById(id);
+  el.className = "msg " + (ok ? "good" : "err");
+  el.textContent = text;
+}
+
+async function login() {
+  creds = { username: document.getElementById("u").value, password: document.getElementById("p").value };
+  try {
+    const j = await api("get");
+    data = j.content;
+    document.getElementById("login").classList.add("hidden");
+    document.getElementById("editor").classList.remove("hidden");
+    draw();
+  } catch (e) {
+    creds = null;
+    say("loginMsg", e.message, false);
+  }
+}
+
+async function reload() {
+  try {
+    data = (await api("get")).content;
+    draw();
+    say("status", "اتحمل آخر محتوى من GitHub", true);
+  } catch (e) { say("status", e.message, false); }
+}
+
+async function save() {
+  try {
+    await api("save", data);
+    say("status", "✅ اتحفظ. التعديل هيظهر في البوت بعد دقيقة تقريباً", true);
+  } catch (e) { say("status", "❌ " + e.message, false); }
+}
+
+function draw() {
+  const t = document.getElementById("tree");
+  t.innerHTML = "";
+  t.appendChild(renderNode(data, null, true));
+}
+
+function renderNode(node, parent, isRoot) {
+  const div = document.createElement("div");
+  div.className = "node";
+
+  if (isRoot) {
+    const h = document.createElement("b");
+    h.textContent = "القايمة الرئيسية";
+    div.appendChild(h);
+  } else {
+    const lbl = document.createElement("input");
+    lbl.placeholder = "اسم الزرار";
+    lbl.value = node.label || "";
+    lbl.oninput = () => node.label = lbl.value;
+    div.appendChild(lbl);
+  }
+
+  const ta = document.createElement("textarea");
+  ta.rows = 3;
+  ta.placeholder = "النص اللي يظهر لما الزرار يتداس";
+  ta.value = node.text || "";
+  ta.oninput = () => node.text = ta.value;
+  div.appendChild(ta);
+
+  const add = document.createElement("button");
+  add.textContent = "➕ زرار جوه";
+  add.onclick = () => {
+    node.items = node.items || [];
+    node.items.push({ label: "زرار جديد", text: "", items: [] });
+    draw();
+  };
+  div.appendChild(add);
+
+  if (!isRoot) {
+    const del = document.createElement("button");
+    del.textContent = "🗑 حذف";
+    del.className = "danger";
+    del.onclick = () => {
+      if (confirm("تحذف الزرار ده وكل اللي جواه؟")) {
+        parent.items.splice(parent.items.indexOf(node), 1);
+        draw();
+      }
+    };
+    div.appendChild(del);
+  }
+
+  if (node.items && node.items.length) {
+    const ch = document.createElement("div");
+    ch.className = "children";
+    node.items.forEach((c) => ch.appendChild(renderNode(c, node, false)));
+    div.appendChild(ch);
+  }
+  return div;
+}
+</script>
+</body>
+</html>
