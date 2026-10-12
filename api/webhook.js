@@ -1,5 +1,6 @@
 // بوت تلجرام: بيعرض القايمة ويتنقل بيها. المحتوى بيتقري من content.json
 import { Bot, InlineKeyboard, webhookCallback } from "grammy";
+import { trackVisitor, trackPress } from "./stats.js";
 
 const CONTENT_URL = process.env.CONTENT_URL; // رابط raw لملف content.json
 const bot = new Bot(process.env.BOT_TOKEN);
@@ -37,12 +38,15 @@ function render(node, path) {
 }
 
 bot.command("start", async (ctx) => {
+  // ctx.match هو الـ source اللي بعد /start (wa / ivr / qr)
+  try { await trackVisitor(ctx.chat.id, ctx.match || "direct"); } catch {}
   const { text, markup } = render(await getContent(), "");
   await ctx.reply(text, { reply_markup: markup });
 });
 
 bot.callbackQuery(/^n:(.*)$/, async (ctx) => {
   const path = ctx.match[1];
+  try { await trackPress(path); } catch {}
   try {
     const node = getNode(await getContent(), path);
     const { text, markup } = render(node, path);

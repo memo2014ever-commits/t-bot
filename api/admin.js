@@ -35,6 +35,8 @@ function validate(node, isRoot = true, depth = 0) {
   return null;
 }
 
+import { getStats } from "./stats.js";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "method" });
 
@@ -44,6 +46,10 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (action === "stats") {
+      return res.json(await getStats());
+    }
+
     if (action === "get") {
       const r = await fetch(`${API}?ref=${GITHUB_BRANCH}`, { headers: GH_HEADERS });
       const j = await r.json();
