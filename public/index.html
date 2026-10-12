@@ -78,7 +78,22 @@
   .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
   .toolbar input { max-width:320px; }
   .node { border:1px solid var(--line); border-radius:12px; padding:12px; margin:10px 0; background:var(--card); transition:box-shadow .15s; }
-  .node.root { border:2px solid #c7d7fb; background:var(--hover); }
+  /* ألوان مميزة لكل مستوى عشان ما يبقاش في بعض */
+  .node.lvl-0 { border:2px solid #2e6be6; background:#f3f7ff; border-right:8px solid #2e6be6; }
+  .node.lvl-1 { border:1px solid #12b76a; background:#f0fdf6; border-right:6px solid #12b76a; }
+  .node.lvl-2 { border:1px solid #7a5af8; background:#f6f3ff; border-right:6px solid #7a5af8; }
+  .node.lvl-3 { border:1px solid #f79009; background:#fffaf2; border-right:6px solid #f79009; }
+  .node.lvl-4 { border:1px solid #f04438; background:#fff5f4; border-right:6px solid #f04438; }
+  :root[data-theme="dark"] .node.lvl-0 { background:#16213a; }
+  :root[data-theme="dark"] .node.lvl-1 { background:#13271f; }
+  :root[data-theme="dark"] .node.lvl-2 { background:#211b3a; }
+  :root[data-theme="dark"] .node.lvl-3 { background:#2a200f; }
+  :root[data-theme="dark"] .node.lvl-4 { background:#2b1515; }
+  .lvl-tag { font-size:12px; font-weight:700; padding:3px 9px; border-radius:99px; color:#fff; }
+  .lvl-0 .lvl-tag { background:#2e6be6; } .lvl-1 .lvl-tag { background:#12b76a; }
+  .lvl-2 .lvl-tag { background:#7a5af8; } .lvl-3 .lvl-tag { background:#f79009; }
+  .lvl-4 .lvl-tag { background:#f04438; }
+  .children { border-right:none !important; padding-right:0 !important; margin-right:14px !important; padding-top:4px; }
   .node.drop { box-shadow:0 0 0 2px var(--brand) inset; background:var(--soft); }
   .node.dragging { opacity:.5; }
   .node-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; cursor:grab; }
@@ -384,10 +399,14 @@ function onSearch(v) { query = v; draw(); }
 function renderNode(node, parent, depth, index) {
   const isRoot = depth === 0;
   const wrap = document.createElement("div");
-  wrap.className = "node" + (isRoot ? " root" : "");
+  wrap.className = "node lvl-" + Math.min(depth, 4);
 
   const head = document.createElement("div");
   head.className = "node-head";
+  const tag = document.createElement("span");
+  tag.className = "lvl-tag";
+  tag.textContent = isRoot ? "قايمة رئيسية" : `مستوى ${depth}`;
+  head.appendChild(tag);
   const title = document.createElement("div");
   title.className = "title";
   title.textContent = isRoot ? "🏠 القايمة الرئيسية (أول رسالة)" : (node.label || "زرار بدون اسم");
