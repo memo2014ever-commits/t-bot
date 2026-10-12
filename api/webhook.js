@@ -50,8 +50,9 @@ bot.callbackQuery(/^n:(.*)$/, async (ctx) => {
   try {
     const node = getNode(await getContent(), path);
     const { text, markup } = render(node, path);
-    await ctx.editMessageText(text, { reply_markup: markup }).catch(() => {});
+    // نبعت رسالة جديدة (زي أي بوت طبيعي) بدل ما نعدّل القايمة
     await ctx.answerCallbackQuery();
+    await ctx.reply(text, { reply_markup: markup });
   } catch {
     await ctx.answerCallbackQuery({ text: "المحتوى اتغير، ابعت /start", show_alert: true });
   }
