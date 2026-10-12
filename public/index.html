@@ -218,6 +218,19 @@ async function login() {
 }
 
 // ---------- الإحصائيات ----------
+// يحوّل المسار (مثلاً 0.1) لاسم الزرار الحقيقي من المحتوى الحالي
+function pathLabel(p) {
+  if (p === "home") return "🏠 القايمة الرئيسية";
+  let node = data;
+  const names = [];
+  for (const i of p.split(".").map(Number)) {
+    if (!node || !node.items || !node.items[i]) return "زرار محذوف أو اتغير";
+    node = node.items[i];
+    names.push(node.label || "بدون اسم");
+  }
+  return names.join(" ← ");
+}
+
 async function loadStats() {
   const box = document.getElementById("stats-body");
   box.innerHTML = '<div class="status">جاري التحميل...</div>';
@@ -227,12 +240,12 @@ async function loadStats() {
       box.innerHTML = '<div class="card" style="border-color:#fedf89;background:#fffcf5">⚠️ الإحصائيات مش متوصلة. اتأكد من ربط Upstash في Vercel وعمل Redeploy.</div>';
       return;
     }
-    const rows = (obj) => {
+    const rows = (obj, mapFn) => {
       const entries = Object.entries(obj).sort((a, b) => b[1] - a[1]);
       const max = Math.max(1, ...entries.map((e) => e[1]));
       if (!entries.length) return '<tr><td colspan="3" class="empty">لا يوجد نشاط بعد</td></tr>';
       return entries.map(([k, v]) => `
-        <tr><td>${k}</td><td>${v}</td>
+        <tr><td>${mapFn ? mapFn(k) : k}</td><td>${v}</td>
         <td style="width:40%"><div class="bar"><span style="width:${(v / max) * 100}%"></span></div></td></tr>`).join("");
     };
     box.innerHTML = `
@@ -242,7 +255,7 @@ async function loadStats() {
         <div class="stat"><div class="n">${st.pressesToday}</div><div class="l">👆 ضغطات النهاردة</div></div>
       </div>
       <div class="card"><h2>الضغطات حسب الزرار (النهاردة)</h2>
-        <table><tr><th>الزرار</th><th>العدد</th><th></th></tr>${rows(st.pressByPath)}</table></div>
+        <table><tr><th>الزرار</th><th>العدد</th><th></th></tr>${rows(st.pressByPath, pathLabel)}</table></div>
       <div class="card"><h2>مصدر العملاء</h2>
         <table><tr><th>المصدر</th><th>العدد</th><th></th></tr>${rows(st.bySource)}</table>
         <p class="status" style="margin-top:10px">المصادر: wa = واتساب، ivr = الخط الساخن، qr = QR Code.</p></div>`;
