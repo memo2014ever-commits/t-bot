@@ -1,0 +1,9 @@
+{
+  "name": "legan-info-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "grammy": "^1.30.0"
+  }
+}
