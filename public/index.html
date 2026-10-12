@@ -6,82 +6,103 @@
 <title>لوحة تحكم البوت</title>
 <style>
   :root {
-    --bg: #f4f6fb; --card: #fff; --line: #e4e8f0; --text: #1d2939; --muted: #667085;
-    --brand: #2e6be6; --brand-2: #1f4fb8; --ok: #12b76a; --bad: #f04438; --warn: #f79009;
-    --radius: 14px; --shadow: 0 1px 2px rgba(16,24,40,.06), 0 4px 14px rgba(16,24,40,.06);
+    --bg:#f4f6fb; --card:#fff; --line:#e4e8f0; --text:#1d2939; --muted:#667085;
+    --brand:#2e6be6; --brand-2:#1f4fb8; --ok:#12b76a; --bad:#f04438; --warn:#f79009;
+    --soft:#eef4ff; --hover:#fafbfd; --radius:14px; --shadow:0 1px 2px rgba(16,24,40,.06),0 4px 14px rgba(16,24,40,.06);
+  }
+  :root[data-theme="dark"] {
+    --bg:#0f1420; --card:#171e2e; --line:#2a3447; --text:#e6ebf5; --muted:#9aa6bd;
+    --brand:#4d86ff; --brand-2:#7aa7ff; --soft:#1d2a44; --hover:#1b2438; --shadow:none;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; background: var(--bg); color: var(--text); }
-  header { background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff; padding: 18px 22px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  header h1 { margin: 0; font-size: 20px; }
-  header .sub { opacity: .85; font-size: 13px; }
-  main { max-width: 1040px; margin: 20px auto; padding: 0 14px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; margin-bottom: 16px; }
-  .card h2 { margin: 0 0 12px; font-size: 16px; }
-  .hidden { display: none !important; }
+  body { margin:0; font-family:"Segoe UI",Tahoma,sans-serif; background:var(--bg); color:var(--text); }
+  header { background:linear-gradient(135deg,var(--brand),var(--brand-2)); color:#fff; padding:16px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:19px; }
+  header .sub { opacity:.85; font-size:13px; }
+  main { max-width:1080px; margin:18px auto; padding:0 14px 60px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px; margin-bottom:14px; }
+  .card h2 { margin:0 0 12px; font-size:16px; }
+  .hidden { display:none !important; }
+  .muted { color:var(--muted); font-size:13px; }
 
-  /* دخول */
-  .login { max-width: 380px; margin: 60px auto; }
-  .login h2 { text-align: center; font-size: 18px; }
+  button { font:inherit; cursor:pointer; border:0; border-radius:10px; padding:8px 13px; background:var(--brand); color:#fff; transition:transform .08s,opacity .2s; white-space:nowrap; }
+  button:hover { opacity:.92; } button:active { transform:scale(.97); }
+  button.ghost { background:var(--card); color:var(--text); border:1px solid var(--line); }
+  button.danger { background:var(--card); color:var(--bad); border:1px solid #fecdca; }
+  button.ok { background:var(--ok); }
+  button.icon { padding:5px 9px; background:var(--card); color:var(--text); border:1px solid var(--line); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
 
-  /* أزرار */
-  button { font: inherit; cursor: pointer; border: 0; border-radius: 10px; padding: 9px 14px; background: var(--brand); color: #fff; transition: transform .08s, opacity .2s; }
-  button:hover { opacity: .92; } button:active { transform: scale(.97); }
-  button.ghost { background: #fff; color: var(--text); border: 1px solid var(--line); }
-  button.danger { background: #fff; color: var(--bad); border: 1px solid #fecdca; }
-  button.ok { background: var(--ok); }
-  button.icon { padding: 6px 10px; background: #fff; color: var(--text); border: 1px solid var(--line); }
-  button:disabled { opacity: .5; cursor: not-allowed; }
+  input, textarea { width:100%; font:inherit; padding:9px 11px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--text); }
+  input:focus, textarea:focus { outline:2px solid #b2ccff; border-color:var(--brand); }
+  textarea { resize:vertical; min-height:80px; line-height:1.7; }
+  label.f { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  .counter { font-size:12px; color:var(--muted); text-align:left; }
 
-  input, textarea { width: 100%; font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--text); }
-  input:focus, textarea:focus { outline: 2px solid #b2ccff; border-color: var(--brand); }
-  textarea { resize: vertical; min-height: 80px; line-height: 1.7; }
-  label.f { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
-  .counter { font-size: 12px; color: var(--muted); text-align: left; }
+  .tabs { display:flex; gap:6px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:4px; margin-bottom:14px; overflow-x:auto; }
+  .tab { background:transparent; color:var(--muted); padding:9px 14px; }
+  .tab.active { background:var(--soft); color:var(--brand); font-weight:600; }
 
-  /* تابز */
-  .tabs { display: flex; gap: 6px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 4px; margin-bottom: 16px; overflow-x: auto; }
-  .tab { background: transparent; color: var(--muted); padding: 9px 14px; white-space: nowrap; }
-  .tab.active { background: #eef4ff; color: var(--brand-2); font-weight: 600; }
+  .savebar { position:sticky; top:0; z-index:10; background:color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter:blur(6px); padding:10px 0; margin-bottom:8px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
+  .status { font-size:13px; color:var(--muted); }
+  .status.warn { color:var(--warn); font-weight:600; }
+  .status.ok { color:var(--ok); }
+
+  .banner { background:#fffbeb; border:1px solid #fedf89; color:#7a4b00; border-radius:12px; padding:12px; margin-bottom:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:space-between; }
+  :root[data-theme="dark"] .banner { background:#2a2312; color:#ffd98a; border-color:#5c4a1c; }
 
   /* إحصائيات */
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 14px; }
-  .stat { background: linear-gradient(180deg, #fff, #f8faff); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
-  .stat .n { font-size: 26px; font-weight: 700; }
-  .stat .l { font-size: 13px; color: var(--muted); margin-top: 4px; }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: right; }
-  th { color: var(--muted); font-weight: 600; background: #fafbfd; }
-  .bar { height: 8px; background: #eef2f7; border-radius: 8px; overflow: hidden; }
-  .bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--brand), #7aa7ff); }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:14px; }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px; box-shadow:var(--shadow); }
+  .kpi .n { font-size:28px; font-weight:700; }
+  .kpi .l { font-size:13px; color:var(--muted); margin-top:4px; }
+  .delta { font-size:12px; margin-top:6px; }
+  .delta.up { color:var(--ok); } .delta.down { color:var(--bad); }
+  .chart { display:flex; align-items:flex-end; gap:10px; height:170px; padding-top:10px; }
+  .col { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; }
+  .bar-v { width:100%; background:linear-gradient(180deg,#7aa7ff,var(--brand)); border-radius:8px 8px 0 0; min-height:3px; }
+  .col .num { font-size:12px; font-weight:600; margin-bottom:4px; }
+  .col .lbl { font-size:12px; color:var(--muted); margin-top:6px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { padding:9px 10px; border-bottom:1px solid var(--line); text-align:right; }
+  th { color:var(--muted); font-weight:600; background:var(--hover); }
+  .bar { height:8px; background:var(--line); border-radius:8px; overflow:hidden; }
+  .bar > span { display:block; height:100%; background:linear-gradient(90deg,var(--brand),#7aa7ff); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { background:var(--soft); color:var(--brand); padding:4px 10px; border-radius:99px; font-size:13px; }
+  .chip.zero { background:#fef3f2; color:var(--bad); }
+  :root[data-theme="dark"] .chip.zero { background:#3a1f1d; }
 
   /* شجرة القوايم */
-  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-  .toolbar .left, .toolbar .right { display: flex; gap: 8px; flex-wrap: wrap; }
-  .node { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 10px 0; background: #fff; }
-  .node.root { border: 2px solid #c7d7fb; background: #fbfcff; }
-  .node-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-  .node-head .title { font-weight: 700; flex: 1; min-width: 150px; }
-  .badge { font-size: 12px; background: #eef4ff; color: var(--brand-2); padding: 3px 9px; border-radius: 99px; }
-  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
-  .children { margin-right: 18px; padding-right: 12px; border-right: 3px solid #cfe0ff; }
-  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+  .toolbar input { max-width:320px; }
+  .node { border:1px solid var(--line); border-radius:12px; padding:12px; margin:10px 0; background:var(--card); transition:box-shadow .15s; }
+  .node.root { border:2px solid #c7d7fb; background:var(--hover); }
+  .node.drop { box-shadow:0 0 0 2px var(--brand) inset; background:var(--soft); }
+  .node.dragging { opacity:.5; }
+  .node-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; cursor:grab; }
+  .node-head .title { font-weight:700; flex:1; min-width:150px; }
+  .badge { font-size:12px; background:var(--soft); color:var(--brand); padding:3px 9px; border-radius:99px; }
+  .actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .children { margin-right:18px; padding-right:12px; border-right:3px solid var(--line); }
+  .empty { color:var(--muted); font-size:13px; padding:6px 0; }
 
-  /* تنبيهات */
-  #toasts { position: fixed; bottom: 18px; left: 18px; display: grid; gap: 8px; z-index: 50; }
-  .toast { background: #101828; color: #fff; padding: 12px 16px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.2); font-size: 14px; max-width: 320px; animation: pop .2s ease; }
-  .toast.ok { background: #067647; } .toast.bad { background: #b42318; }
-  @keyframes pop { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+  #toasts { position:fixed; bottom:18px; left:18px; display:grid; gap:8px; z-index:50; }
+  .toast { background:#101828; color:#fff; padding:12px 16px; border-radius:12px; box-shadow:0 8px 24px rgba(0,0,0,.2); font-size:14px; max-width:320px; animation:pop .2s ease; }
+  .toast.ok { background:#067647; } .toast.bad { background:#b42318; }
+  @keyframes pop { from { transform:translateY(8px); opacity:0; } to { transform:none; opacity:1; } }
 
-  /* نافذة تأكيد */
-  .modal-bg { position: fixed; inset: 0; background: rgba(16,24,40,.45); display: grid; place-items: center; z-index: 60; }
-  .modal { background: #fff; border-radius: 16px; padding: 20px; width: min(380px, 92vw); box-shadow: 0 20px 60px rgba(0,0,0,.25); }
-  .modal p { margin: 0 0 16px; line-height: 1.7; }
-  .modal .row { display: flex; gap: 8px; justify-content: flex-start; }
+  .modal-bg { position:fixed; inset:0; background:rgba(16,24,40,.5); display:grid; place-items:center; z-index:60; padding:14px; }
+  .modal { background:var(--card); color:var(--text); border-radius:16px; padding:20px; width:min(420px,100%); box-shadow:0 20px 60px rgba(0,0,0,.3); max-height:90vh; overflow:auto; }
+  .modal p { margin:0 0 14px; line-height:1.8; white-space:pre-wrap; }
+  .phone { background:#e8efe3; color:#111; border-radius:14px; padding:14px; }
+  .bubble { background:#fff; color:#111; border-radius:12px; padding:12px; line-height:1.8; white-space:pre-wrap; box-shadow:0 1px 1px rgba(0,0,0,.1); }
+  .kbd { display:grid; gap:6px; margin-top:10px; }
+  .kbd div { background:#dfe8f7; color:#1e4fb3; text-align:center; padding:9px; border-radius:8px; font-size:14px; }
+  .modal .row { justify-content:flex-start; }
 
-  .savebar { position: sticky; top: 0; z-index: 10; background: rgba(244,246,251,.92); backdrop-filter: blur(6px); padding: 10px 0; margin: -4px 0 8px; }
-  .status { font-size: 13px; color: var(--muted); }
-  @media (max-width: 600px) { .tab { padding: 8px 10px; font-size: 14px; } header h1 { font-size: 17px; } }
+  @media (max-width:600px) { .tab { padding:8px 10px; font-size:14px; } header h1 { font-size:16px; } .toolbar input { max-width:100%; } }
 </style>
 </head>
 <body>
@@ -89,64 +110,89 @@
 <header>
   <div>
     <h1>🩺 لوحة تحكم بوت اللجان الطبية</h1>
-    <div class="sub">إدارة القوايم والمحتوى والإحصائيات</div>
+    <div class="sub">القوايم والمحتوى والإحصائيات</div>
   </div>
-  <div id="who" class="sub hidden"></div>
+  <div class="row" style="justify-content:flex-end">
+    <span id="who" class="sub hidden"></span>
+    <button class="ghost" id="themeBtn" onclick="toggleTheme()">🌙</button>
+    <button class="ghost hidden" id="logoutBtn" onclick="logout()">خروج</button>
+  </div>
 </header>
 
 <main>
-  <!-- شاشة الدخول -->
-  <section id="login" class="card login">
-    <h2>تسجيل الدخول</h2>
+  <!-- الدخول -->
+  <section id="login" class="card" style="max-width:380px;margin:60px auto">
+    <h2 style="text-align:center">تسجيل الدخول</h2>
     <label class="f">اسم المستخدم</label>
     <input id="u" autocomplete="username" placeholder="اكتب اسم المستخدم">
     <label class="f">كلمة المرور</label>
-    <input id="p" type="password" autocomplete="current-password" placeholder="••••••••"
-           onkeydown="if(event.key==='Enter')login()">
+    <input id="p" type="password" autocomplete="current-password" placeholder="••••••••" onkeydown="if(event.key==='Enter')login()">
     <div style="margin-top:14px"><button style="width:100%" onclick="login()">دخول</button></div>
     <div id="loginMsg" class="status" style="margin-top:10px;color:var(--bad)"></div>
   </section>
 
-  <!-- الشاشة الرئيسية -->
   <section id="app" class="hidden">
     <nav class="tabs">
       <button class="tab active" data-tab="stats" onclick="showTab('stats')">📊 الإحصائيات</button>
       <button class="tab" data-tab="menu" onclick="showTab('menu')">🧭 القوايم والأزرار</button>
+      <button class="tab" data-tab="history" onclick="showTab('history')">🕘 النسخ السابقة</button>
       <button class="tab" data-tab="help" onclick="showTab('help')">💡 مساعدة</button>
     </nav>
 
-    <!-- تبويب الإحصائيات -->
+    <!-- الإحصائيات -->
     <div id="tab-stats">
-      <div class="toolbar">
-        <div class="left"><h2 style="margin:0">الإحصائيات</h2></div>
-        <div class="right"><button class="ghost" onclick="loadStats()">🔄 تحديث</button></div>
+      <div class="row" style="margin-bottom:12px">
+        <h2 style="margin:0">الإحصائيات</h2>
+        <button class="ghost" onclick="loadStats()">🔄 تحديث</button>
       </div>
       <div id="stats-body"></div>
     </div>
 
-    <!-- تبويب القوايم -->
+    <!-- القوايم -->
     <div id="tab-menu" class="hidden">
       <div class="savebar">
-        <div class="toolbar" style="margin:0">
-          <div class="left">
+        <div class="row">
+          <div class="row" style="gap:8px">
             <button class="ok" onclick="save()">💾 حفظ وتحديث البوت</button>
-            <button class="ghost" onclick="reload()">↩️ تراجع لآخر نسخة محفوظة</button>
+            <button class="ghost" onclick="previewRoot()">👁 معاينة القايمة الرئيسية</button>
+            <button class="ghost" onclick="discard()">↩️ تراجع لآخر نسخة محفوظة</button>
           </div>
-          <div class="right"><span id="status" class="status"></span></div>
+          <span id="status" class="status"></span>
         </div>
       </div>
+      <div id="draftBanner" class="banner hidden">
+        <span>فيه مسودة محفوظة في المتصفح من تعديل سابق، عايز ترجعها؟</span>
+        <div class="row" style="gap:6px"><button onclick="restoreDraft()">✅ استرجاع</button><button class="ghost" onclick="dropDraft()">تجاهل</button></div>
+      </div>
+      <div class="toolbar">
+        <input id="search" placeholder="🔍 ابحث باسم زرار أو نص..." oninput="onSearch(this.value)">
+        <span class="muted" id="searchInfo"></span>
+      </div>
+      <div class="muted" style="margin-bottom:6px">💡 اسحب أي زرار وأفلته على زرار تاني عشان يدخل جواه. وعشان ترتب الأزرار جوه نفس القايمة استخدم ⬆️ ⬇️.</div>
       <div id="tree"></div>
     </div>
 
-    <!-- تبويب المساعدة -->
+    <!-- النسخ السابقة -->
+    <div id="tab-history" class="hidden">
+      <div class="row" style="margin-bottom:12px">
+        <h2 style="margin:0">النسخ السابقة</h2>
+        <button class="ghost" onclick="loadHistory()">🔄 تحديث</button>
+      </div>
+      <div class="card" style="padding:0;overflow:auto"><table id="historyTable"></table></div>
+      <p class="muted">"استرجاع" بيحط النسخة دي في المحرر، وبعدين تضغط حفظ عشان تتثبت.</p>
+    </div>
+
+    <!-- المساعدة -->
     <div id="tab-help" class="hidden card">
       <h2>إزاي تستخدم اللوحة</h2>
       <ul style="line-height:2">
         <li><b>القايمة الرئيسية</b> هي اللي بتظهر لما العميل يكتب /start.</li>
-        <li><b>➕ زرار جوه</b> بيضيف زرار تحت العنصر ده، وممكن تضيف جوه أي زرار لحد 4 مستويات.</li>
+        <li><b>➕ زرار جوه</b> بيضيف زرار تحت العنصر ده. الحد 4 مستويات و12 زرار في القايمة.</li>
         <li><b>⬆️ ⬇️</b> بيرتبوا الزراير، و<b>📄</b> بيكرر الزرار بكل محتواه.</li>
-        <li>بعد أي تعديل اضغط <b>حفظ وتحديث البوت</b>، وانتظر دقيقة أو اتنين، وبعدين ابعت /start من جديد.</li>
+        <li><b>👁</b> بيعرض شكل الرسالة زي ما هتظهر في تلجرام قبل الحفظ.</li>
+        <li><b>💾</b> الزرار اللي تحت كل عنصر بيحفظ الشجرة كلها.</li>
         <li>النصوص اللي بين <b>[ ]</b> لازم تتملى بالمعلومة الرسمية قبل النشر.</li>
+        <li>بعد الحفظ استنى دقيقة أو اتنين، وابعت /start للبوت من جديد.</li>
       </ul>
     </div>
   </section>
@@ -155,70 +201,135 @@
 <div id="toasts"></div>
 
 <script>
-let creds = null;
-let data = null;
+const DRAFT_KEY = "legan-draft";
+let creds = null, data = null, role = "admin", dirty = false, draftTimer = null, query = "";
 
-// ---------- أدوات ----------
+const $ = (id) => document.getElementById(id);
+
+// ---------- أدوات عامة ----------
 function toast(msg, type = "") {
   const el = document.createElement("div");
   el.className = "toast " + type;
   el.textContent = msg;
-  document.getElementById("toasts").appendChild(el);
+  $("toasts").appendChild(el);
   setTimeout(() => el.remove(), 3500);
 }
 
-function confirmBox(text) {
+function modal(html) {
   return new Promise((resolve) => {
     const bg = document.createElement("div");
     bg.className = "modal-bg";
-    bg.innerHTML = `<div class="modal"><p></p>
-      <div class="row"><button class="danger" data-y>تأكيد الحذف</button><button class="ghost" data-n>إلغاء</button></div></div>`;
-    bg.querySelector("p").textContent = text;
-    bg.onclick = (e) => {
-      if (e.target.dataset.y !== undefined) { bg.remove(); resolve(true); }
-      else if (e.target.dataset.n !== undefined || e.target === bg) { bg.remove(); resolve(false); }
-    };
+    bg.innerHTML = `<div class="modal">${html}</div>`;
+    bg.addEventListener("click", (e) => {
+      const r = e.target.dataset.r;
+      if (r !== undefined) { bg.remove(); resolve(r === "1"); }
+      else if (e.target === bg) { bg.remove(); resolve(false); }
+    });
     document.body.appendChild(bg);
   });
 }
 
-async function api(action, content) {
+function confirmBox(text, okText = "تأكيد", danger = false) {
+  const esc = text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  return modal(`<p>${esc}</p><div class="row">
+    <button class="${danger ? "danger" : "ok"}" data-r="1">${okText}</button>
+    <button class="ghost" data-r="0">إلغاء</button></div>`);
+}
+
+async function api(action, extra = {}) {
   const res = await fetch("/api/admin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...creds, action, content }),
+    body: JSON.stringify({ ...creds, action, ...extra }),
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || "حصل خطأ");
   return j;
 }
 
-function showTab(name) {
-  document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  ["stats", "menu", "help"].forEach((t) =>
-    document.getElementById("tab-" + t).classList.toggle("hidden", t !== name));
-  if (name === "stats") loadStats();
+function setStatus(text, cls = "") {
+  const el = $("status");
+  el.textContent = text;
+  el.className = "status " + cls;
 }
 
-// ---------- الدخول ----------
+// ---------- الوضع الداكن ----------
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  localStorage.setItem("legan-theme", t);
+  $("themeBtn").textContent = t === "dark" ? "☀️" : "🌙";
+}
+function toggleTheme() {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+}
+applyTheme(localStorage.getItem("legan-theme") || "light");
+
+// ---------- الدخول والخروج ----------
 async function login() {
-  creds = { username: document.getElementById("u").value, password: document.getElementById("p").value };
+  creds = { username: $("u").value, password: $("p").value };
   try {
-    data = (await api("get")).content;
-    document.getElementById("login").classList.add("hidden");
-    document.getElementById("app").classList.remove("hidden");
-    document.getElementById("who").textContent = "مرحباً " + creds.username;
-    document.getElementById("who").classList.remove("hidden");
+    const j = await api("get");
+    data = j.content;
+    role = j.role;
+    $("login").classList.add("hidden");
+    $("app").classList.remove("hidden");
+    $("logoutBtn").classList.remove("hidden");
+    $("who").textContent = `👤 ${creds.username} (${role === "admin" ? "أدمن" : "محرر"})`;
+    $("who").classList.remove("hidden");
+    checkDraft();
     draw();
     loadStats();
   } catch (e) {
     creds = null;
-    document.getElementById("loginMsg").textContent = e.message;
+    $("loginMsg").textContent = e.message;
   }
 }
 
-// ---------- الإحصائيات ----------
-// يحوّل المسار (مثلاً 0.1) لاسم الزرار الحقيقي من المحتوى الحالي
+function logout() {
+  if (dirty && !confirm("فيه تعديلات مش متحفظة. هتتحفظ كمسودة في المتصفح. تخرج؟")) return;
+  if (dirty) localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
+  location.reload();
+}
+
+// ---------- المسودة التلقائية ----------
+function markDirty() {
+  dirty = true;
+  setStatus("● تعديلات غير محفوظة", "warn");
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => localStorage.setItem(DRAFT_KEY, JSON.stringify(data)), 600);
+}
+
+function checkDraft() {
+  const raw = localStorage.getItem(DRAFT_KEY);
+  if (!raw) return;
+  try {
+    if (JSON.stringify(JSON.parse(raw)) !== JSON.stringify(data)) $("draftBanner").classList.remove("hidden");
+    else localStorage.removeItem(DRAFT_KEY);
+  } catch { localStorage.removeItem(DRAFT_KEY); }
+}
+
+function restoreDraft() {
+  data = JSON.parse(localStorage.getItem(DRAFT_KEY));
+  $("draftBanner").classList.add("hidden");
+  markDirty();
+  draw();
+  toast("رجعت المسودة، اضغط حفظ عشان تتثبت", "ok");
+}
+
+function dropDraft() {
+  localStorage.removeItem(DRAFT_KEY);
+  $("draftBanner").classList.add("hidden");
+}
+
+// ---------- التنقل ----------
+function showTab(name) {
+  document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  ["stats", "menu", "history", "help"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
+  if (name === "stats") loadStats();
+  if (name === "history") loadHistory();
+}
+
+// ---------- الشجرة: مسارات وأسماء ----------
 function pathLabel(p) {
   if (p === "home") return "🏠 القايمة الرئيسية";
   let node = data;
@@ -231,68 +342,44 @@ function pathLabel(p) {
   return names.join(" ← ");
 }
 
-async function loadStats() {
-  const box = document.getElementById("stats-body");
-  box.innerHTML = '<div class="status">جاري التحميل...</div>';
-  try {
-    const st = await api("stats");
-    if (!st.configured) {
-      box.innerHTML = '<div class="card" style="border-color:#fedf89;background:#fffcf5">⚠️ الإحصائيات مش متوصلة. اتأكد من ربط Upstash في Vercel وعمل Redeploy.</div>';
-      return;
-    }
-    const rows = (obj, mapFn) => {
-      const entries = Object.entries(obj).sort((a, b) => b[1] - a[1]);
-      const max = Math.max(1, ...entries.map((e) => e[1]));
-      if (!entries.length) return '<tr><td colspan="3" class="empty">لا يوجد نشاط بعد</td></tr>';
-      return entries.map(([k, v]) => `
-        <tr><td>${mapFn ? mapFn(k) : k}</td><td>${v}</td>
-        <td style="width:40%"><div class="bar"><span style="width:${(v / max) * 100}%"></span></div></td></tr>`).join("");
-    };
-    box.innerHTML = `
-      <div class="stats">
-        <div class="stat"><div class="n">${st.subscribersTotal}</div><div class="l">👥 إجمالي المشتركين (تقريبي)</div></div>
-        <div class="stat"><div class="n">${st.subscribersToday}</div><div class="l">🆕 نشطين النهاردة</div></div>
-        <div class="stat"><div class="n">${st.pressesToday}</div><div class="l">👆 ضغطات النهاردة</div></div>
-      </div>
-      <div class="card"><h2>الضغطات حسب الزرار (النهاردة)</h2>
-        <table><tr><th>الزرار</th><th>العدد</th><th></th></tr>${rows(st.pressByPath, pathLabel)}</table></div>
-      <div class="card"><h2>مصدر العملاء</h2>
-        <table><tr><th>المصدر</th><th>العدد</th><th></th></tr>${rows(st.bySource)}</table>
-        <p class="status" style="margin-top:10px">المصادر: wa = واتساب، ivr = الخط الساخن، qr = QR Code.</p></div>`;
-  } catch (e) {
-    box.innerHTML = `<div class="card" style="color:var(--bad)">${e.message}</div>`;
+function allNodes(node = data, path = "", out = []) {
+  out.push({ path, node });
+  (node.items || []).forEach((c, i) => allNodes(c, (path ? path + "." : "") + i, out));
+  return out;
+}
+
+function heightOf(n) {
+  return 1 + Math.max(0, ...(n.items || []).map(heightOf));
+}
+
+function inside(anc, x) {
+  if (anc === x) return true;
+  return (anc.items || []).some((c) => inside(c, x));
+}
+
+function removeNode(target, from = data) {
+  for (let i = 0; i < (from.items || []).length; i++) {
+    if (from.items[i] === target) { from.items.splice(i, 1); return true; }
+    if (removeNode(target, from.items[i])) return true;
   }
+  return false;
 }
 
-// ---------- المحتوى ----------
-async function reload() {
-  try {
-    data = (await api("get")).content;
-    draw();
-    setStatus("✅ اتحمّلت آخر نسخة من GitHub");
-    toast("تم التراجع لآخر نسخة محفوظة", "ok");
-  } catch (e) { toast(e.message, "bad"); }
+function matches(n, q) {
+  return (n.label || "").includes(q) || (n.text || "").includes(q) || (n.items || []).some((c) => matches(c, q));
 }
 
-async function save() {
-  try {
-    setStatus("جاري الحفظ...");
-    await api("save", data);
-    setStatus("✅ اتحفظ. التعديل يظهر في البوت خلال دقيقة أو اتنين");
-    toast("تم الحفظ بنجاح", "ok");
-  } catch (e) {
-    setStatus("❌ " + e.message);
-    toast(e.message, "bad");
-  }
-}
-
-function setStatus(t) { document.getElementById("status").textContent = t; }
-
+// ---------- عرض الشجرة ----------
 function draw() {
-  const t = document.getElementById("tree");
+  const t = $("tree");
   t.innerHTML = "";
+  const q = query.trim();
+  const count = q ? allNodes().filter(({ node }) => (node.label || "").includes(q) || (node.text || "").includes(q)).length : 0;
+  $("searchInfo").textContent = q ? `${count} نتيجة` : "";
   t.appendChild(renderNode(data, null, 0, 0));
 }
+
+function onSearch(v) { query = v; draw(); }
 
 function renderNode(node, parent, depth, index) {
   const isRoot = depth === 0;
@@ -301,16 +388,14 @@ function renderNode(node, parent, depth, index) {
 
   const head = document.createElement("div");
   head.className = "node-head";
-
   const title = document.createElement("div");
   title.className = "title";
   title.textContent = isRoot ? "🏠 القايمة الرئيسية (أول رسالة)" : (node.label || "زرار بدون اسم");
   head.appendChild(title);
-
   if (!isRoot) {
     const badge = document.createElement("span");
     badge.className = "badge";
-    badge.textContent = (node.items && node.items.length) ? `${node.items.length} زرار جوه` : "نص فقط";
+    badge.textContent = node.items && node.items.length ? `${node.items.length} زرار جوه` : "نص فقط";
     head.appendChild(badge);
   }
   wrap.appendChild(head);
@@ -319,50 +404,90 @@ function renderNode(node, parent, depth, index) {
     const lbl = document.createElement("input");
     lbl.placeholder = "اسم الزرار (اللي بيظهر للعميل)";
     lbl.value = node.label || "";
-    lbl.oninput = () => { node.label = lbl.value; title.textContent = lbl.value || "زرار بدون اسم"; };
+    lbl.oninput = () => { node.label = lbl.value; title.textContent = lbl.value || "زرار بدون اسم"; markDirty(); };
     wrap.appendChild(lbl);
   }
 
-  const lblText = document.createElement("label");
-  lblText.className = "f";
-  lblText.textContent = "النص اللي يظهر للعميل";
-  wrap.appendChild(lblText);
+  const lt = document.createElement("label");
+  lt.className = "f";
+  lt.textContent = "النص اللي يظهر للعميل";
+  wrap.appendChild(lt);
 
   const ta = document.createElement("textarea");
   ta.placeholder = "اكتب الرسالة هنا...";
   ta.value = node.text || "";
   const counter = document.createElement("div");
   counter.className = "counter";
-  const updCount = () => counter.textContent = `${(node.text || "").length} / 3500`;
-  ta.oninput = () => { node.text = ta.value; updCount(); };
+  const updCount = () => (counter.textContent = `${(node.text || "").length} / 3500`);
+  ta.oninput = () => { node.text = ta.value; updCount(); markDirty(); };
   updCount();
-  wrap.appendChild(ta);
-  wrap.appendChild(counter);
+  wrap.append(ta, counter);
 
-  // أزرار التحكم في العنصر
+  // سحب وإفلات (ديسكتوب)
+  if (!isRoot) {
+    wrap.draggable = true;
+    wrap.addEventListener("dragstart", (e) => { e.stopPropagation(); window._drag = node; wrap.classList.add("dragging"); });
+    wrap.addEventListener("dragend", () => { window._drag = null; wrap.classList.remove("dragging"); });
+  }
+  wrap.addEventListener("dragover", (e) => {
+    const src = window._drag;
+    if (!src || inside(src, node)) return;
+    if (depth + heightOf(src) > 4) return;
+    e.preventDefault(); e.stopPropagation();
+    wrap.classList.add("drop");
+  });
+  wrap.addEventListener("dragleave", () => wrap.classList.remove("drop"));
+  wrap.addEventListener("drop", (e) => {
+    const src = window._drag;
+    wrap.classList.remove("drop");
+    if (!src || inside(src, node)) return;
+    e.preventDefault(); e.stopPropagation();
+    removeNode(src);
+    node.items = node.items || [];
+    if (node.items.length >= 12) { toast("الحد 12 زرار في القايمة", "bad"); return; }
+    node.items.push(src);
+    window._drag = null;
+    markDirty();
+    draw();
+  });
+
+  // أزرار التحكم
   const actions = document.createElement("div");
   actions.className = "actions";
-  actions.style.marginTop = "10px";
+
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "ok";
+  saveBtn.textContent = "💾 حفظ";
+  saveBtn.title = "يحفظ الشجرة كلها";
+  saveBtn.onclick = () => save();
+  actions.appendChild(saveBtn);
+
+  const prev = document.createElement("button");
+  prev.className = "ghost";
+  prev.textContent = "👁 معاينة";
+  prev.onclick = () => previewNode(node);
+  actions.appendChild(prev);
 
   const addBtn = document.createElement("button");
   addBtn.textContent = "➕ زرار جوه";
   addBtn.onclick = () => {
     if (depth >= 4) return toast("الحد الأقصى 4 مستويات", "bad");
-    if ((node.items || []).length >= 12) return toast("الحد 12 زرار في القايمة الواحدة", "bad");
+    if ((node.items || []).length >= 12) return toast("الحد 12 زرار في القايمة", "bad");
     node.items = node.items || [];
     node.items.push({ label: "زرار جديد", text: "", items: [] });
+    markDirty();
     draw();
   };
   actions.appendChild(addBtn);
 
   if (!isRoot) {
     const up = document.createElement("button");
-    up.className = "icon"; up.textContent = "⬆️"; up.title = "تحريك لفوق";
+    up.className = "icon"; up.textContent = "⬆️"; up.title = "لفوق";
     up.disabled = index === 0;
     up.onclick = () => move(parent, index, -1);
 
     const down = document.createElement("button");
-    down.className = "icon"; down.textContent = "⬇️"; down.title = "تحريك لتحت";
+    down.className = "icon"; down.textContent = "⬇️"; down.title = "لتحت";
     down.disabled = index === parent.items.length - 1;
     down.onclick = () => move(parent, index, 1);
 
@@ -370,29 +495,34 @@ function renderNode(node, parent, depth, index) {
     dup.className = "icon"; dup.textContent = "📄"; dup.title = "تكرار";
     dup.onclick = () => {
       parent.items.splice(index + 1, 0, JSON.parse(JSON.stringify(node)));
-      draw();
+      markDirty(); draw();
     };
+    actions.append(up, down, dup);
 
-    const del = document.createElement("button");
-    del.className = "danger"; del.textContent = "🗑 حذف";
-    del.onclick = async () => {
-      const ok = await confirmBox(`تحذف "${node.label || "الزرار ده"}" وكل اللي جواه؟`);
-      if (ok) { parent.items.splice(index, 1); draw(); }
-    };
-
-    actions.append(up, down, dup, del);
+    if (role === "admin") {
+      const del = document.createElement("button");
+      del.className = "danger"; del.textContent = "🗑 حذف";
+      del.onclick = async () => {
+        const ok = await confirmBox(`تحذف "${node.label || "الزرار ده"}" وكل اللي جواه؟`, "تأكيد الحذف", true);
+        if (ok) { parent.items.splice(index, 1); markDirty(); draw(); }
+      };
+      actions.appendChild(del);
+    }
   }
   wrap.appendChild(actions);
 
   if (node.items && node.items.length) {
     const ch = document.createElement("div");
     ch.className = "children";
-    node.items.forEach((c, i) => ch.appendChild(renderNode(c, node, depth + 1, i)));
+    node.items.forEach((c, i) => {
+      if (query.trim() && !matches(c, query.trim())) return;
+      ch.appendChild(renderNode(c, node, depth + 1, i));
+    });
     wrap.appendChild(ch);
   } else if (!isRoot) {
     const e = document.createElement("div");
     e.className = "empty";
-    e.textContent = "هذا الزرار يعرض نصه فقط. أضف زرار جوه لو عايز قايمة فرعية.";
+    e.textContent = "الزرار ده بيعرض نصه بس. ضيف زرار جوه لو عايز قايمة فرعية.";
     wrap.appendChild(e);
   }
   return wrap;
@@ -402,7 +532,168 @@ function move(parent, index, dir) {
   const j = index + dir;
   if (j < 0 || j >= parent.items.length) return;
   [parent.items[index], parent.items[j]] = [parent.items[j], parent.items[index]];
+  markDirty();
   draw();
+}
+
+function discard() {
+  confirmBox("هيرجع المحرر لآخر نسخة محفوظة على GitHub، والتعديلات اللي ما اتحفظتش هتضيع. متأكد؟", "تراجع", true).then(async (ok) => {
+    if (!ok) return;
+    try {
+      data = (await api("get")).content;
+      dirty = false;
+      localStorage.removeItem(DRAFT_KEY);
+      draw();
+      setStatus("اتحمّلت آخر نسخة من GitHub", "ok");
+    } catch (e) { toast(e.message, "bad"); }
+  });
+}
+
+// ---------- الحفظ ----------
+function findIssues() {
+  const out = [];
+  allNodes().forEach(({ path, node }) => {
+    if (/\[[^\]]*\]/.test(node.text || "")) out.push(`نص فيه [ ] : ${pathLabel(path)}`);
+    if (!node.text && !(node.items || []).length) out.push(`نص فاضي : ${pathLabel(path)}`);
+  });
+  return out;
+}
+
+async function save() {
+  const issues = findIssues();
+  if (issues.length) {
+    const ok = await confirmBox(
+      `فيه ${issues.length} حاجة لسه مش مكتملة:\n\n${issues.slice(0, 6).join("\n")}\n\nتحفظ على أي حال؟`,
+      "احفظ على أي حال", false);
+    if (!ok) return;
+  }
+  try {
+    setStatus("جاري الحفظ...");
+    await api("save", { content: data, message: "تعديل من لوحة التحكم" });
+    dirty = false;
+    localStorage.removeItem(DRAFT_KEY);
+    setStatus("✅ اتحفظ. التعديل يظهر في البوت خلال دقيقة أو اتنين", "ok");
+    toast("تم الحفظ بنجاح", "ok");
+  } catch (e) {
+    setStatus("❌ " + e.message, "warn");
+    toast(e.message, "bad");
+  }
+}
+
+// ---------- المعاينة ----------
+function previewNode(node) {
+  const kids = (node.items || []).map((c) => `<div>${esc(c.label || "")}</div>`).join("");
+  modal(`
+    <h2 style="margin:0 0 10px">👁 معاينة الرسالة</h2>
+    <div class="phone">
+      <div class="bubble">${esc(node.text || "(نص فاضي)")}</div>
+      ${kids ? `<div class="kbd">${kids}</div>` : ""}
+      ${node.items ? '<div class="kbd"><div>🔙 رجوع</div></div>' : ""}
+    </div>
+    <div class="row" style="margin-top:14px"><button class="ghost" data-r="0">إغلاق</button></div>`);
+}
+
+function previewRoot() { previewNode(data); }
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// ---------- الإحصائيات ----------
+async function loadStats() {
+  const box = $("stats-body");
+  box.innerHTML = '<div class="muted">جاري التحميل...</div>';
+  try {
+    const st = await api("stats");
+    if (!st.configured) {
+      box.innerHTML = '<div class="card" style="border-color:#fedf89">⚠️ الإحصائيات مش متوصلة. اربط Upstash في Vercel وعمل Redeploy.</div>';
+      return;
+    }
+
+    const delta = st.pressesYesterday
+      ? Math.round(((st.pressesToday - st.pressesYesterday) / st.pressesYesterday) * 100)
+      : null;
+    const deltaHtml = delta === null
+      ? '<div class="delta muted">مفيش بيانات امبارح للمقارنة</div>'
+      : `<div class="delta ${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "▲" : "▼"} ${Math.abs(delta)}% عن امبارح</div>`;
+
+    const maxD = Math.max(1, ...st.daily.map((d) => d.presses));
+    const chart = st.daily.map((d) => `
+      <div class="col">
+        <div class="num">${d.presses}</div>
+        <div class="bar-v" style="height:${Math.max(3, (d.presses / maxD) * 100)}%"></div>
+        <div class="lbl">${d.date.slice(5)}</div>
+      </div>`).join("");
+
+    const barRows = (obj, mapFn) => {
+      const entries = Object.entries(obj).sort((a, b) => b[1] - a[1]);
+      const max = Math.max(1, ...entries.map((e) => e[1]));
+      if (!entries.length) return '<tr><td colspan="3" class="muted">لا يوجد نشاط بعد</td></tr>';
+      return entries.map(([k, v]) => `
+        <tr><td>${esc(mapFn ? mapFn(k) : k)}</td><td>${v}</td>
+        <td style="width:35%"><div class="bar"><span style="width:${(v / max) * 100}%"></span></div></td></tr>`).join("");
+    };
+
+    // الأزرار اللي ما اتداستش خالص في 7 أيام
+    const used = st.pressByPath7d || {};
+    const unused = allNodes().filter(({ path }) => path !== "" && !used[path]);
+    const unusedHtml = unused.length
+      ? unused.map(({ path, node }) => `<span class="chip zero">${esc(node.label || "بدون اسم")}</span>`).join("")
+      : '<span class="muted">كل الأزرار اتداست خلال آخر 7 أيام ✅</span>';
+
+    box.innerHTML = `
+      <div class="kpis">
+        <div class="kpi"><div class="n">${st.subscribersTotal}</div><div class="l">👥 إجمالي المشتركين (تقريبي)</div></div>
+        <div class="kpi"><div class="n">${st.subscribersToday}</div><div class="l">🆕 نشطين النهاردة</div></div>
+        <div class="kpi"><div class="n">${st.pressesToday}</div><div class="l">👆 ضغطات النهاردة</div>${deltaHtml}</div>
+      </div>
+
+      <div class="card"><h2>الضغطات آخر 7 أيام</h2>
+        <div class="chart">${chart}</div></div>
+
+      <div class="card"><h2>أكتر الأزرار استخداماً (آخر 7 أيام)</h2>
+        <table><tr><th>الزرار</th><th>الضغطات</th><th></th></tr>${barRows(used, pathLabel)}</table></div>
+
+      <div class="card"><h2>أزرار ما اتداستش (7 أيام)</h2>
+        <div class="chips">${unusedHtml}</div>
+        <p class="muted" style="margin:10px 0 0">لو زرار مش بيتداس خالص، ممكن تراجع محتواه أو تشيله.</p></div>
+
+      <div class="card"><h2>مصدر العملاء</h2>
+        <table><tr><th>المصدر</th><th>العدد</th><th></th></tr>${barRows(st.bySource)}</table>
+        <p class="muted" style="margin:10px 0 0">wa = واتساب، ivr = الخط الساخن، qr = QR Code.</p></div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="card" style="color:var(--bad)">${esc(e.message)}</div>`;
+  }
+}
+
+// ---------- سجل النسخ ----------
+async function loadHistory() {
+  const t = $("historyTable");
+  t.innerHTML = '<tr><td class="muted">جاري التحميل...</td></tr>';
+  try {
+    const { commits } = await api("history");
+    if (!commits.length) { t.innerHTML = '<tr><td class="muted">مفيش نسخ بعد</td></tr>'; return; }
+    t.innerHTML = `<tr><th>التاريخ</th><th>الوصف</th><th></th></tr>` + commits.map((c) => `
+      <tr>
+        <td>${new Date(c.date).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</td>
+        <td>${esc(c.message.split("\n")[0])}</td>
+        <td><button class="ghost" onclick="restoreVersion('${c.sha}')">📥 استرجاع</button></td>
+      </tr>`).join("");
+  } catch (e) {
+    t.innerHTML = `<tr><td style="color:var(--bad)">${esc(e.message)}</td></tr>`;
+  }
+}
+
+async function restoreVersion(sha) {
+  const ok = await confirmBox("هيتحط المحتوى ده في المحرر. لازم تضغط حفظ عشان يتثبت على البوت. تكمل؟", "استرجاع", false);
+  if (!ok) return;
+  try {
+    data = (await api("version", { ref: sha })).content;
+    markDirty();
+    showTab("menu");
+    draw();
+    toast("اتحمّلت النسخة في المحرر، اضغط حفظ لتثبيتها", "ok");
+  } catch (e) { toast(e.message, "bad"); }
 }
 </script>
 </body>
