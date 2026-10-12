@@ -427,6 +427,17 @@ function renderNode(node, parent, depth, index) {
     wrap.appendChild(lbl);
   }
 
+  if (!isRoot) {
+    const lu = document.createElement("label");
+    lu.className = "f";
+    lu.textContent = "🔗 رابط (اختياري): لو اتملى، الزرار يفتح الرابط بدل ما يفتح قايمة";
+    const ui = document.createElement("input");
+    ui.placeholder = "https://t.me/H19806bot";
+    ui.value = node.url || "";
+    ui.oninput = () => { node.url = ui.value.trim() || undefined; markDirty(); };
+    wrap.append(lu, ui);
+  }
+
   const lt = document.createElement("label");
   lt.className = "f";
   lt.textContent = "النص اللي يظهر للعميل";
