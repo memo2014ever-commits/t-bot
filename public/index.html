@@ -33,6 +33,11 @@
 <!-- شاشة التحرير -->
 <div id="editor" class="hidden">
   <div class="box">
+    <h3>📊 الإحصائيات</h3>
+    <button onclick="loadStats()">🔄 تحديث الأرقام</button>
+    <div id="stats"></div>
+  </div>
+  <div class="box">
     <button class="ok" onclick="save()">💾 حفظ وتحديث البوت</button>
     <button onclick="reload()">🔄 إعادة تحميل</button>
     <div id="status"></div>
@@ -56,6 +61,29 @@ async function api(action, content) {
   return j;
 }
 
+async function loadStats() {
+  const box = document.getElementById("stats");
+  try {
+    const st = await api("stats");
+    if (!st.configured) {
+      box.innerHTML = '<div class="msg err">الإحصائيات مش متوصلة: ضيف UPSTASH_REDIS_REST_URL و UPSTASH_REDIS_REST_TOKEN في Vercel وعمل Redeploy</div>';
+      return;
+    }
+    const rows = (obj) => Object.entries(obj)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("") || '<tr><td colspan="2">لا يوجد بيانات بعد</td></tr>';
+    box.innerHTML = `
+      <p>👥 إجمالي المشتركين (تقريبي): <b>${st.subscribersTotal}</b></p>
+      <p>🆕 نشطين النهاردة: <b>${st.subscribersToday}</b></p>
+      <p>👆 ضغطات النهاردة: <b>${st.pressesToday}</b></p>
+      <b>الضغطات حسب الزرار:</b>
+      <table border="1" cellpadding="6" style="width:100%;border-collapse:collapse"><tr><th>الزرار</th><th>عدد الضغطات</th></tr>${rows(st.pressByPath)}</table>
+      <br><b>المصدر (wa / ivr / qr):</b>
+      <table border="1" cellpadding="6" style="width:100%;border-collapse:collapse"><tr><th>المصدر</th><th>عدد</th></tr>${rows(st.bySource)}</table>
+      <p style="color:#666;font-size:13px">* العدد الإجمالي تقريبي (HyperLogLog)، ومفيش أي أرقام شخصية محفوظة.</p>`;
+  } catch (e) { box.innerHTML = `<div class="msg err">${e.message}</div>`; }
+}
+
 function say(id, text, ok) {
   const el = document.getElementById(id);
   el.className = "msg " + (ok ? "good" : "err");
@@ -67,6 +95,7 @@ async function login() {
   try {
     const j = await api("get");
     data = j.content;
+    loadStats();
     document.getElementById("login").classList.add("hidden");
     document.getElementById("editor").classList.remove("hidden");
     draw();
