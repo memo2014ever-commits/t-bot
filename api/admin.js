@@ -38,6 +38,7 @@ function validate(node, isRoot = true, depth = 0) {
   if (!node || typeof node.text !== "string") return "فيه عنصر من غير نص";
   if (node.text.length > 3500) return "نص طويل جداً (الحد 3500 حرف)";
   if (!isRoot && (!node.label || typeof node.label !== "string")) return "فيه زرار من غير اسم";
+  if (node.url !== undefined && node.url !== "" && !/^https:\/\/[^\s]+$/.test(node.url)) return "الرابط لازم يبدأ بـ https://";
   if (node.items !== undefined && !Array.isArray(node.items)) return "items لازم تكون قايمة";
   if ((node.items || []).length > 12) return "الحد 12 زرار في القايمة الواحدة";
   for (const child of node.items || []) {

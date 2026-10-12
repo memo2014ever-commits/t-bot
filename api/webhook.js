@@ -28,7 +28,8 @@ function getNode(root, path) {
 function render(node, path) {
   const kb = new InlineKeyboard();
   (node.items || []).forEach((item, i) => {
-    kb.text(item.label, `n:${path ? path + "." : ""}${i}`).row();
+    if (item.url) kb.url(item.label, item.url).row();   // زرار يفتح رابط (مثلاً البوت الأساسي)
+    else kb.text(item.label, `n:${path ? path + "." : ""}${i}`).row();
   });
   if (path !== "") {
     const parent = path.includes(".") ? path.slice(0, path.lastIndexOf(".")) : "";
