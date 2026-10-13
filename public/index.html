@@ -204,6 +204,12 @@
           <button class="ghost" onclick="exportQuestions()">📥 تصدير</button>
         </div>
       </div>
+      <div class="card" id="qWordsCard">
+        <h2>🧠 كلمات التعرف على السؤال</h2>
+        <p class="muted" style="margin-top:-6px">أي رسالة فيها واحدة من الكلمات دي بتتعتبر سؤال. افصل بينهم بفاصلة أو سطر جديد. سيب الخانة فاضية عشان ترجع للقايمة الافتراضية.</p>
+        <textarea id="qWords" rows="4" placeholder="ازاي، فين، امتى، هل، ممكن، عنوان، موعد، سعر..." oninput="onWordsEdit(this.value)"></textarea>
+        <div class="row" style="margin-top:8px"><span class="muted" id="qWordsInfo"></span><button class="ok" onclick="save()">💾 حفظ</button></div>
+      </div>
       <div class="toolbar"><input id="qSearch" placeholder="🔍 ابحث في الأسئلة..." oninput="renderQuestions()"></div>
       <div class="card" style="padding:0;overflow:auto"><table id="qTable"></table></div>
       <p class="muted">الأسئلة بتتجمع: لو أكتر من عميل سأل نفس السؤال، بيظهر العدد جنبه. مفيش أي بيانات شخصية محفوظة.</p>
@@ -987,9 +993,23 @@ function esc(v) {
 
 // ---------- الأسئلة ----------
 let questionsCache = [];
+function renderWordsBox() {
+  const ta = $("qWords");
+  if (!ta || !data) return;
+  const list = Array.isArray(data.questionWords) ? data.questionWords : [];
+  ta.value = list.join("، ");
+  $("qWordsInfo").textContent = list.length ? `${list.length} كلمة مخصصة` : "بتستخدم القايمة الافتراضية";
+}
+function onWordsEdit(v) {
+  const list = v.split(/[،,\n]/).map((w) => w.trim()).filter(Boolean);
+  if (list.length) data.questionWords = list; else delete data.questionWords;
+  $("qWordsInfo").textContent = list.length ? `${list.length} كلمة مخصصة` : "بتستخدم القايمة الافتراضية";
+  markDirty();
+}
 function normQ(q) { return q.trim().replace(/\s+/g, " ").toLowerCase(); }
 
 async function loadQuestions() {
+  renderWordsBox();
   try {
     questionsCache = (await api("questions")).questions;
     renderQuestions();
