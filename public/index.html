@@ -442,6 +442,33 @@ function parentPath(p) {
   return p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : "";
 }
 
+// كارت رسايل النظام: نصوص البوت اللي مش مرتبطة بزرار
+function systemCard() {
+  if (!data.messages) data.messages = {};
+  const m = data.messages;
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>⚙️ رسايل النظام</h2>
+    <p class="muted" style="margin-top:-6px">الرسايل دي بتظهر للعميل في حالات معينة. سيب الخانة فاضية عشان ترجع للرسالة الافتراضية.</p>`;
+  const fields = [
+    ["askPrompt", "💬 الرسالة اللي بتظهر لما العميل يدوس زرار السؤال", "اكتب سؤالك هنا 👇"],
+    ["askThanks", "🌷 الرسالة اللي بتظهر بعد ما العميل يبعت سؤاله", "استلمنا سؤالك، شكراً لتواصلك 🌷"],
+    ["fallback", "👇 الرد لما العميل يكتب كلام عادي (مش سؤال)", "اختار من الأزرار تحت 👇"],
+  ];
+  fields.forEach(([key, label, def]) => {
+    const lb = document.createElement("label");
+    lb.className = "f";
+    lb.textContent = label;
+    const ta = document.createElement("textarea");
+    ta.rows = 2;
+    ta.placeholder = "الافتراضي: " + def;
+    ta.value = m[key] || "";
+    ta.oninput = () => { if (ta.value.trim()) m[key] = ta.value; else delete m[key]; markDirty(); };
+    card.append(lb, ta);
+  });
+  return card;
+}
+
 function navBar() {
   const wrap = document.createElement("div");
   wrap.className = "card";
@@ -519,6 +546,7 @@ function draw() {
   const parent = currentPath === "" ? null : getNodeByPath(parentPath(currentPath));
   const index = currentPath === "" ? 0 : Number(currentPath.split(".").pop());
 
+  t.appendChild(systemCard());
   t.appendChild(navBar());
   t.appendChild(renderNode(node, parent, depth, index));
 }
@@ -746,7 +774,7 @@ function findIssues() {
   const out = [];
   allNodes().forEach(({ path, node }) => {
     if (/\[[^\]]*\]/.test(node.text || "")) out.push(`نص فيه [ ] : ${pathLabel(path)}`);
-    if (!node.text && !(node.items || []).length) out.push(`نص فاضي : ${pathLabel(path)}`);
+    if (node.action !== "ask" && !node.text && !(node.items || []).length) out.push(`نص فاضي : ${pathLabel(path)}`);
   });
   return out;
 }
