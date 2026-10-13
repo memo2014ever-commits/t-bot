@@ -39,21 +39,22 @@ function render(node, path) {
 }
 
 bot.command("start", async (ctx) => {
-  // ctx.match هو الـ source اللي بعد /start (wa / ivr / qr)
-  try { await trackVisitor(ctx.chat.id, ctx.match || "direct"); } catch {}
   const { text, markup } = render(await getContent(), "");
   await ctx.reply(text, { reply_markup: markup });
+  // التسجيل بعد الرد: أي مشكلة في الإحصائيات ما تأثرش على العميل
+  try { await trackVisitor(ctx.chat.id, ctx.match || "direct"); } catch {}
 });
 
 bot.callbackQuery(/^n:(.*)$/, async (ctx) => {
   const path = ctx.match[1];
-  try { await trackPress(path); } catch {}
   try {
     const node = getNode(await getContent(), path);
     const { text, markup } = render(node, path);
     // نبعت رسالة جديدة (زي أي بوت طبيعي) بدل ما نعدّل القايمة
     await ctx.answerCallbackQuery();
     await ctx.reply(text, { reply_markup: markup });
+    // التسجيل بعد الرد
+    try { await trackPress(path); } catch {}
   } catch {
     await ctx.answerCallbackQuery({ text: "المحتوى اتغير، ابعت /start", show_alert: true });
   }
