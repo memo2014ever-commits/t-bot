@@ -123,7 +123,9 @@ bot.on("message:text", async (ctx) => {
   const prompt = m.askPrompt || DEFAULT_PROMPT;
   const r = ctx.message.reply_to_message;
   const rText = (r && r.text) || "";
-  if (r && r.from?.is_bot && (rText === prompt || rText.startsWith("اكتب سؤالك"))) {
+  // نقبل الرد على رسالة طلب السؤال، أو على رسالة "مش واضح" (عشان العميل يعيد الكتابة)
+  const isAskPrompt = rText === prompt || rText.startsWith("اكتب سؤالك") || rText.startsWith("مش واضح إنه سؤال");
+  if (r && r.from?.is_bot && isAskPrompt) {
     const customWords = Array.isArray(content.questionWords) && content.questionWords.length
       ? content.questionWords : QUESTION_WORDS;
     if (!looksLikeQuestion(ctx.message.text, customWords)) {
