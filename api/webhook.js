@@ -15,6 +15,8 @@ const DEFAULT_DYM = "تقصد؟ اختار من دول 👇";
 const DEFAULT_MEDICAL = "السؤال ده محتاج متابعة طبية، ومش هقدر أرد عليه هنا.\nللمساعدة اتصل بالخط الساخن 19806 📞";
 const DEFAULT_LIMIT = "استنفدت عدد الأسئلة المسموحة ({max}) خلال 24 ساعة 🙏\nتقدر تسأل تاني بعد 24 ساعة من أول سؤال.";
 const DEFAULT_LEFT = "(باقي لك {left} أسئلة خلال 24 ساعة)";
+const DEFAULT_INQUIRY = "للاستعلام عن موعدك أو حجزك، ادخل على بوت الحجز مباشرة 👇";
+const DEFAULT_INQUIRY_WORDS = ["استعلم", "استعلام", "موعدي", "حجزي", "متابعه", "حاله الطلب", "رقم الطلب"];
 const DEFAULT_MED_WORDS = ["علاج", "دوا", "دواء", "ادويه", "اعراض", "الم", "وجع", "مرض", "جرعه", "تشخيص", "حساسيه", "حراره"];
 
 const fill = (t, vars) => Object.entries(vars).reduce((a, [k, v]) => a.split("{" + k + "}").join(String(v)), t);
@@ -29,6 +31,12 @@ function norm(t = "") {
     .replace(/\s+/g, " ").trim();
 }
 const padded = (t) => " " + norm(t) + " ";
+
+function hasInquiry(text, custom) {
+  const list = Array.isArray(custom) && custom.length ? custom : DEFAULT_INQUIRY_WORDS;
+  const t = padded(text);
+  return list.some((w) => { const k = norm(w); return k && t.includes(" " + k + " "); });
+}
 
 function hasMedical(text, custom) {
   const list = Array.isArray(custom) && custom.length ? custom : DEFAULT_MED_WORDS;
@@ -223,6 +231,15 @@ bot.on("message:text", async (ctx) => {
   // 1) السؤال الطبي: يتحوّل للخط الساخن
   if (hasMedical(text, content.medicalKeywords)) {
     return ctx.reply(toHtml(m.medical || DEFAULT_MEDICAL), HTML_OPTS(root));
+  }
+
+  // 1.5) استعلام عن حجز أو موعد: رسالة واحدة، وزرار اختياري يتحدد من اللوحة
+  if (hasInquiry(text, content.inquiryKeywords)) {
+    const btnText = (m.inquiryButtonText || "").trim();
+    const btnUrl = (m.inquiryButtonUrl || "").trim();
+    const validUrl = /^https:\/\/\S+$/.test(btnUrl);
+    const kb = validUrl ? new InlineKeyboard().url(btnText || "📅 فتح", btnUrl) : undefined;
+    return ctx.reply(toHtml(m.inquiry || DEFAULT_INQUIRY), HTML_OPTS(kb));
   }
 
   // 2) بحث في المحتوى (زراير + استدعاء + نص)، قبل أي فلتر

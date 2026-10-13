@@ -119,6 +119,12 @@ export default async function handler(req, res) {
     if (action === "save") {
       const err = validate(content);
       if (err) return res.status(400).json({ error: err });
+      if (content.inquiryKeywords !== undefined) {
+        if (!Array.isArray(content.inquiryKeywords) || content.inquiryKeywords.length > 100 ||
+            content.inquiryKeywords.some((w) => typeof w !== "string" || w.length > 40)) {
+          return res.status(400).json({ error: "كلمات الاستعلام لازم تكون قايمة كلمات قصيرة (حد 100 كلمة)" });
+        }
+      }
       if (content.medicalKeywords !== undefined) {
         if (!Array.isArray(content.medicalKeywords) || content.medicalKeywords.length > 100 ||
             content.medicalKeywords.some((w) => typeof w !== "string" || w.length > 40)) {
