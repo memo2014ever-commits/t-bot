@@ -150,6 +150,8 @@
     <nav class="tabs">
       <button class="tab active" data-tab="stats" onclick="showTab('stats')">📊 الإحصائيات</button>
       <button class="tab" data-tab="menu" onclick="showTab('menu')">🧭 القوايم والأزرار</button>
+      <button class="tab" data-tab="questions" onclick="showTab('questions')">💬 الأسئلة</button>
+      <button class="tab" data-tab="presslog" onclick="showTab('presslog')">🧾 سجل الضغطات</button>
       <button class="tab" data-tab="history" onclick="showTab('history')">🕘 النسخ السابقة</button>
       <button class="tab" data-tab="help" onclick="showTab('help')">💡 مساعدة</button>
     </nav>
@@ -160,6 +162,8 @@
         <h2 style="margin:0">الإحصائيات</h2>
         <div class="row" style="gap:6px">
           <button class="ghost" onclick="loadStats()">🔄 تحديث</button>
+          <button class="ghost" onclick="exportAll()">📥 تصدير CSV</button>
+          <button class="ghost" onclick="openReport()">📄 تقرير شامل</button>
           <button class="danger" onclick="resetAllStats()">🧹 تصفير الإحصائيات</button>
         </div>
       </div>
@@ -190,6 +194,34 @@
       <div id="tree"></div>
     </div>
 
+    <!-- الأسئلة -->
+    <div id="tab-questions" class="hidden">
+      <div class="row" style="margin-bottom:12px">
+        <h2 style="margin:0">أسئلة العملاء</h2>
+        <div class="row" style="gap:6px">
+          <button class="ghost" onclick="loadQuestions()">🔄 تحديث</button>
+          <button class="ghost" onclick="exportQuestions()">📥 تصدير</button>
+        </div>
+      </div>
+      <div class="toolbar"><input id="qSearch" placeholder="🔍 ابحث في الأسئلة..." oninput="renderQuestions()"></div>
+      <div class="card" style="padding:0;overflow:auto"><table id="qTable"></table></div>
+      <p class="muted">الأسئلة بتتجمع: لو أكتر من عميل سأل نفس السؤال، بيظهر العدد جنبه. مفيش أي بيانات شخصية محفوظة.</p>
+    </div>
+
+    <!-- سجل الضغطات -->
+    <div id="tab-presslog" class="hidden">
+      <div class="row" style="margin-bottom:12px">
+        <h2 style="margin:0">سجل الضغطات</h2>
+        <div class="row" style="gap:6px">
+          <button class="ghost" onclick="loadPressLog()">🔄 تحديث</button>
+          <button class="ghost" onclick="exportPressLog()">📥 تصدير</button>
+        </div>
+      </div>
+      <div class="toolbar"><input id="pSearch" placeholder="🔍 ابحث باسم الزرار..." oninput="renderPressLog()"></div>
+      <div class="card" style="padding:0;overflow:auto"><table id="pTable"></table></div>
+      <p class="muted">آخر 300 ضغطة بالوقت. الوقت بتوقيت القاهرة.</p>
+    </div>
+
     <!-- النسخ السابقة -->
     <div id="tab-history" class="hidden">
       <div class="row" style="margin-bottom:12px">
@@ -208,6 +240,7 @@
         <li><b>➕ زرار جوه</b> بيضيف زرار تحت العنصر ده. الحد 4 مستويات و12 زرار في القايمة.</li>
         <li><b>⬆️ ⬇️</b> بيرتبوا الزراير، و<b>📄</b> بيكرر الزرار بكل محتواه.</li>
         <li><b>👁</b> بيعرض شكل الرسالة زي ما هتظهر في تلجرام قبل الحفظ.</li>
+        <li><b>💬 زرار سؤال:</b> فعّل خانة "زرار سؤال" في أي زرار، والعميل يقدر يكتب سؤاله بعدها، والسؤال يظهر في تبويب الأسئلة.</li>
         <li><b>كلمة تفتح رابط داخل النص:</b> اكتب في النص <code>[اضغط هنا](https://...)</code>، وتظهر كلمة "اضغط هنا" قابلة للضغط.</li>
         <li><b>زرار يفتح رابط تحت الرسالة:</b> املى خانة "🔗 رابط" في الزرار.</li>
         <li><b>القوايم بتتفتح وتتقفل</b> بالضغط على اسمها (زي dropdown).</li>
@@ -345,8 +378,10 @@ function dropDraft() {
 // ---------- التنقل ----------
 function showTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  ["stats", "menu", "history", "help"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
+  ["stats", "menu", "questions", "presslog", "history", "help"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
   if (name === "stats") loadStats();
+  if (name === "questions") loadQuestions();
+  if (name === "presslog") loadPressLog();
   if (name === "history") loadHistory();
 }
 
@@ -534,6 +569,19 @@ function renderNode(node, parent, depth, index) {
     lbl.value = node.label || "";
     lbl.oninput = () => { node.label = lbl.value; title.textContent = lbl.value || "زرار بدون اسم"; markDirty(); };
     wrap.appendChild(lbl);
+  }
+
+  if (!isRoot) {
+    const askRow = document.createElement("label");
+    askRow.className = "f";
+    askRow.style.cssText = "display:flex;gap:8px;align-items:center;color:var(--text)";
+    const askBox = document.createElement("input");
+    askBox.type = "checkbox";
+    askBox.style.width = "auto";
+    askBox.checked = node.action === "ask";
+    askBox.onchange = () => { if (askBox.checked) node.action = "ask"; else delete node.action; markDirty(); draw(); };
+    askRow.append(askBox, document.createTextNode("💬 زرار سؤال (يفتح للعميل خانة يكتب فيها سؤاله)"));
+    wrap.appendChild(askRow);
   }
 
   if (!isRoot) {
@@ -781,11 +829,194 @@ async function resetAllStats() {
   } catch (e) { toast(e.message, "bad"); }
 }
 
+let lastStats = null;
+
+// نفس فلتر العرض: الزراير الموجودة بس
+function currentUsed(st) {
+  return Object.fromEntries(Object.entries(st.pressByPath7d || {}).filter(([k]) => {
+    const [p, l] = k.split("|");
+    if (!l) return false;
+    const node = getNodeByPath(p);
+    return !!node && node.label === l;
+  }));
+}
+
+function unusedNodes(st) {
+  const used = currentUsed(st);
+  const usedPaths = Object.keys(used).map((k) => k.split("|")[0]);
+  return allNodes().filter(({ path }) => path !== "" && !usedPaths.includes(path));
+}
+
+function csvDownload(fileName, rows) {
+  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const csv = "\uFEFF" + rows.map((r) => r.map(esc).join(",")).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  a.download = fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
+
+function dailyRows(st) {
+  return [["التاريخ", "مشتركين جداد", "ضغطات"], ...st.daily.map((d) => [d.date, d.newSubs, d.presses])];
+}
+function buttonRows(st) {
+  const used = currentUsed(st);
+  return [["الزرار", "الضغطات (7 أيام)"], ...Object.entries(used)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => [k.split("|")[1], v])];
+}
+function sourceRows(st) {
+  return [["المصدر", "العدد"], ...Object.entries(st.bySource || {}).sort((a, b) => b[1] - a[1])];
+}
+function unusedRows(st) {
+  return [["زرار ما اتداسش خلال 7 أيام"], ...unusedNodes(st).map(({ node }) => [node.label || "بدون اسم"])];
+}
+
+function exportDaily() { if (lastStats) csvDownload(`يومي_${today()}.csv`, dailyRows(lastStats)); }
+function exportButtons() { if (lastStats) csvDownload(`الزراير_${today()}.csv`, buttonRows(lastStats)); }
+function exportSources() { if (lastStats) csvDownload(`المصادر_${today()}.csv`, sourceRows(lastStats)); }
+function exportUnused() { if (lastStats) csvDownload(`غير_مستخدم_${today()}.csv`, unusedRows(lastStats)); }
+
+function exportAll() {
+  if (!lastStats) return;
+  const st = lastStats;
+  const rows = [
+    ["ملخص"],
+    ["إجمالي المشتركين (تقريبي)", st.subscribersTotal],
+    ["نشطين النهاردة", st.subscribersToday],
+    ["ضغطات النهاردة", st.pressesToday],
+    ["ضغطات امبارح", st.pressesYesterday],
+    [],
+    ...dailyRows(st), [],
+    ...buttonRows(st), [],
+    ...sourceRows(st), [],
+    ...unusedRows(st),
+  ];
+  csvDownload(`تقرير_البوت_${today()}.csv`, rows);
+}
+
+function openReport() {
+  if (!lastStats) return;
+  const st = lastStats;
+  const table = (rows) => {
+    const [head, ...body] = rows;
+    return `<table><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>${
+      body.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</table>`;
+  };
+  const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
+  <title>تقرير البوت ${today()}</title>
+  <style>
+    body{font-family:"Segoe UI",Tahoma,sans-serif;margin:24px;color:#1d2939}
+    h1{color:#1f3a5f} h2{color:#2e6be6;margin-top:24px}
+    .kpis{display:flex;gap:12px;flex-wrap:wrap} .kpi{border:1px solid #e4e8f0;border-radius:10px;padding:12px 16px;min-width:160px}
+    .kpi b{font-size:22px;display:block}
+    table{width:100%;border-collapse:collapse;margin-top:8px;font-size:14px}
+    th,td{border-bottom:1px solid #e4e8f0;padding:8px;text-align:right} th{background:#f8fafc}
+    @media print{ button{display:none} body{margin:10mm} }
+  </style></head><body>
+  <h1>تقرير بوت اللجان الطبية</h1>
+  <p>تاريخ التقرير: ${today()}</p>
+  <div class="kpis">
+    <div class="kpi"><b>${st.subscribersTotal}</b>إجمالي المشتركين (تقريبي)</div>
+    <div class="kpi"><b>${st.subscribersToday}</b>نشطين النهاردة</div>
+    <div class="kpi"><b>${st.pressesToday}</b>ضغطات النهاردة</div>
+    <div class="kpi"><b>${st.pressesYesterday}</b>ضغطات امبارح</div>
+  </div>
+  <h2>يومي (آخر 7 أيام)</h2>${table(dailyRows(st))}
+  <h2>أكتر الزراير استخداماً</h2>${table(buttonRows(st))}
+  <h2>مصادر العملاء</h2>${table(sourceRows(st))}
+  <h2>زراير ما اتداستش</h2>${table(unusedRows(st))}
+  <br><button onclick="window.print()">🖨 طباعة / حفظ PDF</button>
+  </body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) return toast("اسمح بالنوافذ المنبثقة عشان التقرير يفتح", "bad");
+  w.document.write(html);
+  w.document.close();
+}
+
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// ---------- الأسئلة ----------
+let questionsCache = [];
+function normQ(q) { return q.trim().replace(/\s+/g, " ").toLowerCase(); }
+
+async function loadQuestions() {
+  try {
+    questionsCache = (await api("questions")).questions;
+    renderQuestions();
+  } catch (e) { toast(e.message, "bad"); }
+}
+
+function renderQuestions() {
+  const t = $("qTable");
+  const q = ($("qSearch").value || "").trim();
+  const counts = {};
+  questionsCache.forEach((x) => { const k = normQ(x.q); counts[k] = (counts[k] || 0) + 1; });
+  const rows = questionsCache.filter((x) => !q || x.q.includes(q));
+  if (!rows.length) { t.innerHTML = '<tr><td class="muted">مفيش أسئلة بعد</td></tr>'; return; }
+  t.innerHTML = `<tr><th>السؤال</th><th>عدد مرات</th><th>الوقت</th><th></th></tr>` + rows.map((x) => `
+    <tr>
+      <td style="white-space:pre-wrap">${esc(x.q)}</td>
+      <td>${counts[normQ(x.q)] > 1 ? `<span class="chip">${counts[normQ(x.q)]}</span>` : "1"}</td>
+      <td>${fmtTime(x.t)}</td>
+      <td><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
+    </tr>`).join("");
+}
+
+async function deleteQ(raw) {
+  const ok = await confirmBox("تمسح السؤال ده؟", "حذف", true);
+  if (!ok) return;
+  try {
+    await api("delq", { ref: raw });
+    questionsCache = questionsCache.filter((x) => x.raw !== raw);
+    renderQuestions();
+    toast("اتمسح", "ok");
+  } catch (e) { toast(e.message, "bad"); }
+}
+
+function exportQuestions() {
+  csvDownload(`الأسئلة_${today()}.csv`, [["التاريخ", "السؤال"],
+    ...questionsCache.map((x) => [fmtTime(x.t), x.q])]);
+}
+
+function fmtTime(ms) {
+  return new Date(ms).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" });
+}
+
+// ---------- سجل الضغطات ----------
+let pressCache = [];
+async function loadPressLog() {
+  try {
+    pressCache = (await api("presslog")).log;
+    renderPressLog();
+  } catch (e) { toast(e.message, "bad"); }
+}
+
+function renderPressLog() {
+  const t = $("pTable");
+  const q = ($("pSearch").value || "").trim();
+  const rows = pressCache.filter((x) => !q || (x.l || "").includes(q));
+  if (!rows.length) { t.innerHTML = '<tr><td class="muted">مفيش ضغطات بعد</td></tr>'; return; }
+  t.innerHTML = `<tr><th>الوقت</th><th>الزرار</th><th>المكان</th></tr>` + rows.map((x) => `
+    <tr><td>${fmtTime(x.t)}</td><td>${esc(x.l || "—")}</td><td class="muted">${esc(x.p === "" ? "الرئيسية" : x.p)}</td></tr>`).join("");
+}
+
+function exportPressLog() {
+  csvDownload(`سجل_الضغطات_${today()}.csv`, [["الوقت", "الزرار", "المكان"],
+    ...pressCache.map((x) => [fmtTime(x.t), x.l, x.p])]);
+}
+
 async function loadStats() {
   const box = $("stats-body");
   box.innerHTML = '<div class="muted">جاري التحميل...</div>';
   try {
     const st = await api("stats");
+    lastStats = st;
     if (!st.configured) {
       box.innerHTML = '<div class="card" style="border-color:#fedf89">⚠️ الإحصائيات مش متوصلة. اربط Upstash في Vercel وعمل Redeploy.</div>';
       return;
@@ -836,17 +1067,17 @@ async function loadStats() {
         <div class="kpi"><div class="n">${st.pressesToday}</div><div class="l">👆 ضغطات النهاردة</div>${deltaHtml}</div>
       </div>
 
-      <div class="card"><h2>الضغطات آخر 7 أيام</h2>
+      <div class="card"><div class="row"><h2 style="margin:0">الضغطات آخر 7 أيام</h2><button class="ghost" onclick="exportDaily()">📥 تصدير</button></div>
         <div class="chart">${chart}</div></div>
 
-      <div class="card"><h2>أكتر الأزرار استخداماً (آخر 7 أيام)</h2>
+      <div class="card"><div class="row"><h2 style="margin:0">أكتر الزراير استخداماً (7 أيام)</h2><button class="ghost" onclick="exportButtons()">📥 تصدير</button></div>
         <table><tr><th>الزرار</th><th>الضغطات</th><th></th></tr>${barRows(used, (k) => k.split("|")[1] || k)}</table></div>
 
-      <div class="card"><h2>أزرار ما اتداستش (7 أيام)</h2>
+      <div class="card"><div class="row"><h2 style="margin:0">زراير ما اتداستش (7 أيام)</h2><button class="ghost" onclick="exportUnused()">📥 تصدير</button></div>
         <div class="chips">${unusedHtml}</div>
         <p class="muted" style="margin:10px 0 0">لو زرار مش بيتداس خالص، ممكن تراجع محتواه أو تشيله.</p></div>
 
-      <div class="card"><h2>مصدر العملاء</h2>
+      <div class="card"><div class="row"><h2 style="margin:0">مصدر العملاء</h2><button class="ghost" onclick="exportSources()">📥 تصدير</button></div>
         <table><tr><th>المصدر</th><th>العدد</th><th></th></tr>${barRows(st.bySource)}</table>
         <p class="muted" style="margin:10px 0 0">wa = واتساب، ivr = الخط الساخن، qr = QR Code.</p></div>`;
   } catch (e) {
