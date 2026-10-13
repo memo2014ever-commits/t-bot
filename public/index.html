@@ -646,8 +646,8 @@ function renderNode(node, parent, depth, index) {
 
   const askBtn = document.createElement("button");
   askBtn.className = "ghost";
-  askBtn.textContent = "💬 زرار سؤال";
-  askBtn.title = "زرار مستقل: العميل يدوسه ويكتب سؤاله";
+  askBtn.textContent = "💬 أضف زرار سؤال هنا";
+  askBtn.title = "بيضيف زرار جديد جوه القايمة دي: العميل يدوسه ويكتب سؤاله";
   askBtn.onclick = () => {
     if (depth >= 4) return toast("الحد الأقصى 4 مستويات", "bad");
     if ((node.items || []).length >= 12) return toast("الحد 12 زرار في القايمة", "bad");
@@ -668,7 +668,7 @@ function renderNode(node, parent, depth, index) {
     draw();
   };
   actions.appendChild(addBtn);
-  actions.appendChild(askBtn);
+  if (node.action !== "ask") actions.appendChild(askBtn);
 
   if (!isRoot) {
     const up = document.createElement("button");
