@@ -100,6 +100,19 @@ function looksLikeQuestion(text = "", words = QUESTION_WORDS) {
   return words.some((w) => t.includes(" " + norm(w) + " "));
 }
 
+// اسم الزرار الأب لأي مسار (عشان "تقصد؟" توضح المكان)
+function parentLabelOf(content, path) {
+  if (!path.includes(".")) return "";
+  const parent = getNode(content, path.slice(0, path.lastIndexOf(".")));
+  return parent?.label || "";
+}
+
+// يحوّل نص الاختيار: اسم البند + المكان بين قوسين
+function choiceLine(content, hit) {
+  const where = parentLabelOf(content, hit.path);
+  return where ? `• ${hit.node.label} (${where})` : `• ${hit.node.label}`;
+}
+
 function render(node, path) {
   const kb = new InlineKeyboard();
   (node.items || []).forEach((item, i) => {
@@ -210,12 +223,14 @@ bot.on("message:text", async (ctx) => {
   const hits = searchNodes(content, text);
   if (hits.length === 1) return showHit(ctx, hits[0]);
   if (hits.length > 1) {
+    const top = hits.slice(0, 4);
     const kb = new InlineKeyboard();
-    hits.slice(0, 4).forEach((h) => {
+    top.forEach((h) => {
       if (h.node.url) kb.url(h.node.label, h.node.url).row();
       else kb.text(h.node.label, `n:${h.path}`).row();
     });
-    return ctx.reply(toHtml(m.didYouMean || DEFAULT_DYM), HTML_OPTS(kb));
+    const lines = top.map((h) => choiceLine(content, h)).join("\n");
+    return ctx.reply(toHtml((m.didYouMean || DEFAULT_DYM) + "\n\n" + lines), HTML_OPTS(kb));
   }
 
   // 4) مفيش تطابق: رد عام مع القايمة
