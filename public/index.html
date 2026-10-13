@@ -388,20 +388,108 @@ function matches(n, q) {
 }
 
 // ---------- عرض الشجرة ----------
+let currentPath = "";   // المسار اللي المحرر واقف عليه (فارغ = القايمة الرئيسية)
+
+function getNodeByPath(p) {
+  let n = data;
+  if (p === "") return n;
+  for (const i of p.split(".").map(Number)) {
+    if (!n || !n.items || !n.items[i]) return null;
+    n = n.items[i];
+  }
+  return n;
+}
+
+function parentPath(p) {
+  return p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : "";
+}
+
+function navBar() {
+  const wrap = document.createElement("div");
+  wrap.className = "card";
+  wrap.style.cssText = "padding:12px";
+
+  const parts = currentPath === "" ? [] : currentPath.split(".");
+
+  // سلسلة قوايم منسدلة: كل قايمة بتفتح اللي بعدها
+  const chain = document.createElement("div");
+  chain.style.cssText = "display:flex;flex-wrap:wrap;gap:10px;align-items:center";
+
+  const levels = parts.length + 1;   // مستوى الجذر + كل مستوى مختار
+  for (let k = 0; k < levels; k++) {
+    const prefix = parts.slice(0, k).join(".");
+    const node = getNodeByPath(prefix);
+    if (!node || !node.items || !node.items.length) break;
+
+    const box = document.createElement("div");
+    box.style.cssText = "display:flex;flex-direction:column;gap:4px;min-width:200px;flex:1";
+    const lb = document.createElement("span");
+    lb.className = "muted";
+    lb.textContent = k === 0 ? "🏠 القايمة الرئيسية:" : `↳ الزرار الفرعي (${k}):`;
+
+    const sel = document.createElement("select");
+    sel.style.cssText = "padding:9px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "— اختار —";
+    sel.appendChild(none);
+    node.items.forEach((c, i) => {
+      const o = document.createElement("option");
+      o.value = String(i);
+      o.textContent = c.label || "بدون اسم";
+      sel.appendChild(o);
+    });
+    sel.value = k < parts.length ? parts[k] : "";
+    sel.onchange = () => {
+      const v = sel.value;
+      currentPath = v === "" ? prefix : [...parts.slice(0, k), v].join(".");
+      draw();
+    };
+
+    box.append(lb, sel);
+    chain.appendChild(box);
+  }
+
+  const tools = document.createElement("div");
+  tools.style.cssText = "display:flex;gap:6px;margin-top:10px";
+  const up = document.createElement("button");
+  up.className = "ghost";
+  up.textContent = "⬅️ للقايمة اللي فوق";
+  up.disabled = currentPath === "";
+  up.onclick = () => { currentPath = parentPath(currentPath); draw(); };
+  const home = document.createElement("button");
+  home.className = "ghost";
+  home.textContent = "🏠 الرئيسية";
+  home.disabled = currentPath === "";
+  home.onclick = () => { currentPath = ""; draw(); };
+  tools.append(up, home);
+
+  wrap.append(chain, tools);
+  return wrap;
+}
+
 function draw() {
   const t = $("tree");
   t.innerHTML = "";
   const q = query.trim();
   const count = q ? allNodes().filter(({ node }) => (node.label || "").includes(q) || (node.text || "").includes(q)).length : 0;
   $("searchInfo").textContent = q ? `${count} نتيجة` : "";
-  t.appendChild(renderNode(data, null, 0, 0));
+
+  let node = getNodeByPath(currentPath);
+  if (!node) { currentPath = ""; node = data; }
+  const depth = currentPath === "" ? 0 : currentPath.split(".").length;
+  const parent = currentPath === "" ? null : getNodeByPath(parentPath(currentPath));
+  const index = currentPath === "" ? 0 : Number(currentPath.split(".").pop());
+
+  t.appendChild(navBar());
+  t.appendChild(renderNode(node, parent, depth, index));
 }
 
 function onSearch(v) { query = v; draw(); }
 
 const openSet = new WeakSet();   // حالة الفتح/القفل بس، مش بتتحفظ في الملف
 function isOpen(node, depth) {
-  return depth === 0 || !!query.trim() || openSet.has(node);
+  return depth === 0 || !!query.trim() || openSet.has(node) || node === getNodeByPath(currentPath);
 }
 function toggleOpen(node) {
   openSet.has(node) ? openSet.delete(node) : openSet.add(node);
