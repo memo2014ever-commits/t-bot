@@ -115,6 +115,12 @@ export default async function handler(req, res) {
     if (action === "save") {
       const err = validate(content);
       if (err) return res.status(400).json({ error: err });
+      if (content.questionWords !== undefined) {
+        if (!Array.isArray(content.questionWords) || content.questionWords.length > 200 ||
+            content.questionWords.some((w) => typeof w !== "string" || w.length > 30)) {
+          return res.status(400).json({ error: "كلمات السؤال لازم تكون قايمة كلمات قصيرة (حد 200 كلمة)" });
+        }
+      }
       if (content.messages !== undefined) {
         if (typeof content.messages !== "object") return res.status(400).json({ error: "رسايل النظام غلط" });
         for (const v of Object.values(content.messages)) {

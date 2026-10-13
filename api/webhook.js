@@ -60,12 +60,12 @@ const QUESTION_WORDS = [
   "ينفع", "لازم", "المستندات", "مستندات", "أعرف", "اعرف", "اعرّف", "قولي", "قوللي", "ابعتلي", "احجز", "أحجز",
   "اقرب", "أقرب", "لجنة", "لجان", "الكشف", "كشف", "نتيجة", "طلب", "تأجيل", "الغاء", "إلغاء", "تعديل",
 ];
-function looksLikeQuestion(text = "") {
+function looksLikeQuestion(text = "", words = QUESTION_WORDS) {
   const t = text.trim();
   if (t.length < 4) return false;
   const low = " " + t.toLowerCase().replace(/[.,!؟?]/g, " ") + " ";
   // نطابق الكلمة كاملة (عشان "اهلا" ما تتحسبش سؤال بسبب "هل")
-  return QUESTION_WORDS.some((w) => low.includes(" " + w + " "));
+  return words.some((w) => low.includes(" " + w + " "));
 }
 
 const HTML_OPTS = (markup) => ({
@@ -124,7 +124,9 @@ bot.on("message:text", async (ctx) => {
   const r = ctx.message.reply_to_message;
   const rText = (r && r.text) || "";
   if (r && r.from?.is_bot && (rText === prompt || rText.startsWith("اكتب سؤالك"))) {
-    if (!looksLikeQuestion(ctx.message.text)) {
+    const customWords = Array.isArray(content.questionWords) && content.questionWords.length
+      ? content.questionWords : QUESTION_WORDS;
+    if (!looksLikeQuestion(ctx.message.text, customWords)) {
       // مش سؤال واضح: نطلب منه يكتبه تاني
       return ctx.reply("مش واضح إنه سؤال، اكتب سؤالك بشكل واضح، مثلاً: ممكن أعرف عنوان لجنة القاهرة؟", {
         reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
