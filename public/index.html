@@ -571,20 +571,8 @@ function renderNode(node, parent, depth, index) {
     wrap.appendChild(lbl);
   }
 
-  if (!isRoot) {
-    const askRow = document.createElement("label");
-    askRow.className = "f";
-    askRow.style.cssText = "display:flex;gap:8px;align-items:center;color:var(--text)";
-    const askBox = document.createElement("input");
-    askBox.type = "checkbox";
-    askBox.style.width = "auto";
-    askBox.checked = node.action === "ask";
-    askBox.onchange = () => { if (askBox.checked) node.action = "ask"; else delete node.action; markDirty(); draw(); };
-    askRow.append(askBox, document.createTextNode("💬 زرار سؤال (يفتح للعميل خانة يكتب فيها سؤاله)"));
-    wrap.appendChild(askRow);
-  }
-
-  if (!isRoot) {
+  const isAsk = node.action === "ask";
+  if (!isRoot && !isAsk) {
     const lu = document.createElement("label");
     lu.className = "f";
     lu.textContent = "🔗 رابط (اختياري): لو اتملى، الزرار يفتح الرابط بدل ما يفتح قايمة";
@@ -598,7 +586,7 @@ function renderNode(node, parent, depth, index) {
   const lt = document.createElement("label");
   lt.className = "f";
   lt.textContent = "النص اللي يظهر للعميل";
-  wrap.appendChild(lt);
+  if (!isAsk) wrap.appendChild(lt);
 
   const ta = document.createElement("textarea");
   ta.placeholder = "اكتب الرسالة هنا...";
@@ -608,7 +596,7 @@ function renderNode(node, parent, depth, index) {
   const updCount = () => (counter.textContent = `${(node.text || "").length} / 3500`);
   ta.oninput = () => { node.text = ta.value; updCount(); markDirty(); };
   updCount();
-  wrap.append(ta, counter);
+  if (!isAsk) wrap.append(ta, counter);
 
   // سحب وإفلات (ديسكتوب)
   // السحب من العنوان بس (مش من الكارت كله) عشان تحديد النص داخل الخانات يشتغل عادي
@@ -656,6 +644,19 @@ function renderNode(node, parent, depth, index) {
   prev.onclick = () => previewNode(node);
   actions.appendChild(prev);
 
+  const askBtn = document.createElement("button");
+  askBtn.className = "ghost";
+  askBtn.textContent = "💬 زرار سؤال";
+  askBtn.title = "زرار مستقل: العميل يدوسه ويكتب سؤاله";
+  askBtn.onclick = () => {
+    if (depth >= 4) return toast("الحد الأقصى 4 مستويات", "bad");
+    if ((node.items || []).length >= 12) return toast("الحد 12 زرار في القايمة", "bad");
+    node.items = node.items || [];
+    node.items.push({ label: "💬 ابعت سؤالك", action: "ask", text: "", items: [] });
+    markDirty();
+    draw();
+  };
+
   const addBtn = document.createElement("button");
   addBtn.textContent = "➕ زرار جوه";
   addBtn.onclick = () => {
@@ -667,6 +668,7 @@ function renderNode(node, parent, depth, index) {
     draw();
   };
   actions.appendChild(addBtn);
+  actions.appendChild(askBtn);
 
   if (!isRoot) {
     const up = document.createElement("button");
@@ -710,7 +712,9 @@ function renderNode(node, parent, depth, index) {
   } else if (!isRoot && !hasKids) {
     const e = document.createElement("div");
     e.className = "empty";
-    e.textContent = "الزرار ده بيعرض نصه بس. ضيف زرار جوه لو عايز قايمة فرعية.";
+    e.textContent = isAsk
+      ? "💬 زرار سؤال: لما العميل يدوسه، بيفتح له خانة يكتب فيها سؤاله."
+      : "الزرار ده بيعرض نصه بس. ضيف زرار جوه لو عايز قايمة فرعية.";
     wrap.appendChild(e);
   }
   return wrap;
