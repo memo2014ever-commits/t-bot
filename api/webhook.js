@@ -144,7 +144,8 @@ function render(node, path) {
   });
   if (path !== "") {
     const parent = path.includes(".") ? path.slice(0, path.lastIndexOf(".")) : "";
-    kb.text("🔙 رجوع", `b:${parent}`);
+    kb.text("🔙 رجوع", `b:${parent}`).row();
+    kb.text("🏠 القايمة الرئيسية", "home");   // يرجّع لأول قايمة في البوت
   }
   return { text: node.text || node.label || "—", markup: kb };
 }
@@ -175,6 +176,7 @@ async function showNode(ctx, path, track) {
 
 bot.callbackQuery(/^n:(.*)$/, (ctx) => showNode(ctx, ctx.match[1], true));
 bot.callbackQuery(/^b:(.*)$/, (ctx) => showNode(ctx, ctx.match[1], false));
+bot.callbackQuery("home", (ctx) => showNode(ctx, "", false));
 
 // زرار "ابعت سؤالك"
 bot.callbackQuery(/^ask:(.*)$/, async (ctx) => {
