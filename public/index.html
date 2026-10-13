@@ -158,7 +158,10 @@
     <div id="tab-stats">
       <div class="row" style="margin-bottom:12px">
         <h2 style="margin:0">الإحصائيات</h2>
-        <button class="ghost" onclick="loadStats()">🔄 تحديث</button>
+        <div class="row" style="gap:6px">
+          <button class="ghost" onclick="loadStats()">🔄 تحديث</button>
+          <button class="danger" onclick="resetAllStats()">🧹 تصفير الإحصائيات</button>
+        </div>
       </div>
       <div id="stats-body"></div>
     </div>
@@ -737,6 +740,25 @@ function esc(s) {
 }
 
 // ---------- الإحصائيات ----------
+// اسم الزرار من المفتاح المحفوظ: لو الزرار اتغير أو اتحذف بنضيف تنبيه
+function statLabel(key) {
+  const [p, l] = key.split("|");
+  if (!l) return pathLabel(p);
+  const node = getNodeByPath(p);
+  const same = node && node.label === l;
+  return same ? l : `${l} (اتغير أو اتحذف)`;
+}
+
+async function resetAllStats() {
+  const ok = await confirmBox("هتتصفر كل الإحصائيات (الضغطات والمشتركين والمصادر). مش هيتأثر البوت ولا المحتوى. متأكد؟", "تصفير", true);
+  if (!ok) return;
+  try {
+    await api("reset");
+    toast("اتصفرت الإحصائيات", "ok");
+    loadStats();
+  } catch (e) { toast(e.message, "bad"); }
+}
+
 async function loadStats() {
   const box = $("stats-body");
   box.innerHTML = '<div class="muted">جاري التحميل...</div>';
@@ -772,8 +794,15 @@ async function loadStats() {
     };
 
     // الأزرار اللي ما اتداستش خالص في 7 أيام
-    const used = st.pressByPath7d || {};
-    const unused = allNodes().filter(({ path }) => path !== "" && !used[path]);
+    // نعرض بس الزراير الموجودة فعلاً (المحذوف أو المتغير اسمه ما يظهرش)
+    const used = Object.fromEntries(Object.entries(st.pressByPath7d || {}).filter(([k]) => {
+      const [p, l] = k.split("|");
+      if (!l) return false;
+      const node = getNodeByPath(p);
+      return !!node && node.label === l;
+    }));
+    const usedPaths = Object.keys(used).map((k) => k.split("|")[0]);
+    const unused = allNodes().filter(({ path }) => path !== "" && !usedPaths.includes(path));
     const unusedHtml = unused.length
       ? unused.map(({ path, node }) => `<span class="chip zero">${esc(node.label || "بدون اسم")}</span>`).join("")
       : '<span class="muted">كل الأزرار اتداست خلال آخر 7 أيام ✅</span>';
@@ -789,7 +818,7 @@ async function loadStats() {
         <div class="chart">${chart}</div></div>
 
       <div class="card"><h2>أكتر الأزرار استخداماً (آخر 7 أيام)</h2>
-        <table><tr><th>الزرار</th><th>الضغطات</th><th></th></tr>${barRows(used, pathLabel)}</table></div>
+        <table><tr><th>الزرار</th><th>الضغطات</th><th></th></tr>${barRows(used, (k) => k.split("|")[1] || k)}</table></div>
 
       <div class="card"><h2>أزرار ما اتداستش (7 أيام)</h2>
         <div class="chips">${unusedHtml}</div>
