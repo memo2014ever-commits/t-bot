@@ -17,6 +17,14 @@ async function getContent() {
   return cache;
 }
 
+
+// يحوّل النص: [كلمة](https://...) لكلمة قابلة للضغط، والباقي يتعرض زي ما هو
+function toHtml(text = "") {
+  const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return esc(text).replace(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g, (_, label, url) =>
+    `<a href="${url}">${label}</a>`);
+}
+
 // المسار "0.2" يعني: الزرار رقم 0، جواه الزرار رقم 2. الجذر = ""
 function getNode(root, path) {
   let node = root;
@@ -40,7 +48,7 @@ function render(node, path) {
 
 bot.command("start", async (ctx) => {
   const { text, markup } = render(await getContent(), "");
-  await ctx.reply(text, { reply_markup: markup });
+  await ctx.reply(toHtml(text), { parse_mode: "HTML", reply_markup: markup, link_preview_options: { is_disabled: true } });
   // التسجيل بعد الرد: أي مشكلة في الإحصائيات ما تأثرش على العميل
   try { await trackVisitor(ctx.chat.id, ctx.match || "direct"); } catch {}
 });
@@ -52,7 +60,7 @@ bot.callbackQuery(/^n:(.*)$/, async (ctx) => {
     const { text, markup } = render(node, path);
     // نبعت رسالة جديدة (زي أي بوت طبيعي) بدل ما نعدّل القايمة
     await ctx.answerCallbackQuery();
-    await ctx.reply(text, { reply_markup: markup });
+    await ctx.reply(toHtml(text), { parse_mode: "HTML", reply_markup: markup, link_preview_options: { is_disabled: true } });
     // التسجيل بعد الرد
     try { await trackPress(path); } catch {}
   } catch {
