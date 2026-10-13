@@ -247,6 +247,7 @@
         <li><b>➕ زرار جوه</b> بيضيف زرار تحت العنصر ده. الحد 4 مستويات و12 زرار في القايمة.</li>
         <li><b>⬆️ ⬇️</b> بيرتبوا الزراير، و<b>📄</b> بيكرر الزرار بكل محتواه.</li>
         <li><b>👁</b> بيعرض شكل الرسالة زي ما هتظهر في تلجرام قبل الحفظ.</li>
+        <li><b>🔑 كلمات الاستدعاء:</b> كلمات تخلي الزرار يظهر لو العميل كتبها (زي "لجنة" أو "عنوان").</li>
         <li><b>💬 زرار سؤال:</b> فعّل خانة "زرار سؤال" في أي زرار، والعميل يقدر يكتب سؤاله بعدها، والسؤال يظهر في تبويب الأسئلة.</li>
         <li><b>كلمة تفتح رابط داخل النص:</b> اكتب في النص <code>[اضغط هنا](https://...)</code>، وتظهر كلمة "اضغط هنا" قابلة للضغط.</li>
         <li><b>زرار يفتح رابط تحت الرسالة:</b> املى خانة "🔗 رابط" في الزرار.</li>
@@ -449,38 +450,74 @@ function parentPath(p) {
   return p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : "";
 }
 
-// نافذة رسايل النظام: بتتفتح بزرار في الشريط فوق
+// نافذة رسايل النظام: مقسمة حسب الوظيفة
 function openSystemMessages() {
   if (!data.messages) data.messages = {};
   const m = data.messages;
-  const fields = [
-    ["askPrompt", "💬 الرسالة اللي بتظهر لما العميل يدوس زرار السؤال", "اكتب سؤالك هنا 👇"],
-    ["askThanks", "🌷 الرسالة اللي بتظهر بعد ما العميل يبعت سؤاله", "استلمنا سؤالك، شكراً لتواصلك 🌷"],
-    ["fallback", "👇 الرد لما العميل يكتب كلام عادي (مش سؤال)", "اختار من الأزرار تحت 👇"],
-    ["remaining", "🔢 الجملة اللي بتظهر بعد السؤال (اكتب {left} عشان يتكتب الرقم)", "(باقي لك {left} أسئلة خلال 24 ساعة)"],
-    ["limitReached", "🚫 الرسالة لما العميل يخلص أسئلته (اكتب {max} عشان يتكتب الحد)", "استنفدت عدد الأسئلة المسموحة ({max}) خلال 24 ساعة 🙏"],
+  const sections = [
+    ["🔍 البحث عن الإجابة", [
+      ["didYouMean", "لما يكون فيه أكتر من إجابة محتملة، والعميل يختار", "تقصد؟ اختار من دول 👇"],
+    ]],
+    ["💬 الأسئلة", [
+      ["askPrompt", "الرسالة لما العميل يدوس زرار السؤال", "اكتب سؤالك هنا 👇"],
+      ["askThanks", "الرسالة بعد ما العميل يبعت سؤاله", "استلمنا سؤالك، شكراً لتواصلك 🌷"],
+      ["remaining", "الجملة اللي بتظهر بعد السؤال (اكتب {left} للرقم)", "(باقي لك {left} أسئلة خلال 24 ساعة)"],
+      ["limitReached", "لما العميل يخلص أسئلته (اكتب {max} للحد)", "استنفدت عدد الأسئلة المسموحة ({max}) خلال 24 ساعة 🙏"],
+    ]],
+    ["🩺 الأسئلة الطبية", [
+      ["medical", "الرسالة لما السؤال يكون طبي (حالة أو علاج)", "السؤال ده محتاج متابعة طبية... للمساعدة اتصل بالخط الساخن 19806 📞"],
+    ], "medicalKeywords"],
+    ["👇 عامة", [
+      ["fallback", "الرد لما العميل يكتب كلام مش مفهوم", "اختار من الأزرار تحت 👇"],
+    ]],
   ];
+
   const bg = document.createElement("div");
   bg.className = "modal-bg";
   const box = document.createElement("div");
   box.className = "modal";
-  box.style.width = "min(560px,100%)";
+  box.style.width = "min(600px,100%)";
   box.innerHTML = `<h2 style="margin:0 0 6px">⚙️ رسايل النظام</h2>
-    <p class="muted" style="margin:0 0 10px">سيب الخانة فاضية عشان ترجع للرسالة الافتراضية (موضحة تحت كل خانة).</p>`;
-  fields.forEach(([key, label, def]) => {
-    const lb = document.createElement("label");
-    lb.className = "f";
-    lb.textContent = label;
-    const ta = document.createElement("textarea");
-    ta.rows = 2;
-    ta.placeholder = "الافتراضي: " + def;
-    ta.value = m[key] || "";
-    ta.oninput = () => { if (ta.value.trim()) m[key] = ta.value; else delete m[key]; markDirty(); };
-    box.append(lb, ta);
+    <p class="muted" style="margin:0 0 10px">كل قسم رسايله مرتبطة بوظيفة واحدة. سيب الخانة فاضية عشان ترجع للرسالة الافتراضية.</p>`;
+
+  sections.forEach(([title, fields, special]) => {
+    const h = document.createElement("h3");
+    h.style.cssText = "margin:16px 0 4px;color:var(--brand)";
+    h.textContent = title;
+    box.appendChild(h);
+
+    fields.forEach(([key, label, def]) => {
+      const lb = document.createElement("label");
+      lb.className = "f";
+      lb.textContent = label;
+      const ta = document.createElement("textarea");
+      ta.rows = 2;
+      ta.placeholder = "الافتراضي: " + def;
+      ta.value = m[key] || "";
+      ta.oninput = () => { if (ta.value.trim()) m[key] = ta.value; else delete m[key]; markDirty(); };
+      box.append(lb, ta);
+    });
+
+    if (special === "medicalKeywords") {
+      const lb = document.createElement("label");
+      lb.className = "f";
+      lb.textContent = "كلمات الأسئلة الطبية (بفاصلة). لو العميل كتب أي كلمة منهم، البوت يحوله للخط الساخن";
+      const ta = document.createElement("textarea");
+      ta.rows = 2;
+      ta.placeholder = "علاج، دوا، ألم، أعراض، مرض، جرعة، تشخيص، حساسية، حرارة";
+      ta.value = (data.medicalKeywords || []).join("، ");
+      ta.oninput = () => {
+        const list = ta.value.split(/[،,]/).map((w) => w.trim()).filter(Boolean);
+        if (list.length) data.medicalKeywords = list; else delete data.medicalKeywords;
+        markDirty();
+      };
+      box.append(lb, ta);
+    }
   });
+
   const close = document.createElement("button");
   close.textContent = "تم";
-  close.style.marginTop = "12px";
+  close.style.marginTop = "14px";
   close.onclick = () => bg.remove();
   box.appendChild(close);
   bg.appendChild(box);
@@ -615,6 +652,20 @@ function renderNode(node, parent, depth, index) {
     lbl.value = node.label || "";
     lbl.oninput = () => { node.label = lbl.value; title.textContent = lbl.value || "زرار بدون اسم"; markDirty(); };
     wrap.appendChild(lbl);
+    if (node.action !== "ask") {
+      const lk = document.createElement("label");
+      lk.className = "f";
+      lk.textContent = "🔑 كلمات الاستدعاء (اختياري، بفاصلة): الكلمات اللي لو العميل كتبها، الزرار ده يظهر له";
+      const ki = document.createElement("input");
+      ki.placeholder = "مثلاً: لجنة، عنوان، فين";
+      ki.value = (node.keywords || []).join("، ");
+      ki.oninput = () => {
+        const list = ki.value.split(/[،,]/).map((w) => w.trim()).filter(Boolean);
+        if (list.length) node.keywords = list; else delete node.keywords;
+        markDirty();
+      };
+      wrap.append(lk, ki);
+    }
   }
 
   const isAsk = node.action === "ask";
