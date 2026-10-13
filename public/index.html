@@ -560,10 +560,11 @@ function renderNode(node, parent, depth, index) {
   wrap.append(ta, counter);
 
   // سحب وإفلات (ديسكتوب)
+  // السحب من العنوان بس (مش من الكارت كله) عشان تحديد النص داخل الخانات يشتغل عادي
   if (!isRoot) {
-    wrap.draggable = true;
-    wrap.addEventListener("dragstart", (e) => { e.stopPropagation(); window._drag = node; wrap.classList.add("dragging"); });
-    wrap.addEventListener("dragend", () => { window._drag = null; wrap.classList.remove("dragging"); });
+    head.draggable = true;
+    head.addEventListener("dragstart", (e) => { e.stopPropagation(); window._drag = node; wrap.classList.add("dragging"); });
+    head.addEventListener("dragend", () => { window._drag = null; wrap.classList.remove("dragging"); });
   }
   wrap.addEventListener("dragover", (e) => {
     const src = window._drag;
