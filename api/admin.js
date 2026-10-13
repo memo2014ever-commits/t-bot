@@ -1,7 +1,7 @@
 // خادم لوحة التحكم: تسجيل دخول بدورين (أدمن / محرر)، وقراءة وحفظ وسجل نسخ من GitHub
 // كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
 import { timingSafeEqual } from "crypto";
-import { getStats, resetStats } from "./stats.js";
+import { getStats, resetStats, getQuestions, deleteQuestion, getPressLog } from "./stats.js";
 
 const {
   ADMIN_USER, ADMIN_PASS,          // الأدمن: يعدّل ويحذف
@@ -38,6 +38,7 @@ function validate(node, isRoot = true, depth = 0) {
   if (!node || typeof node.text !== "string") return "فيه عنصر من غير نص";
   if (node.text.length > 3500) return "نص طويل جداً (الحد 3500 حرف)";
   if (!isRoot && (!node.label || typeof node.label !== "string")) return "فيه زرار من غير اسم";
+  if (node.action !== undefined && node.action !== "ask") return "نوع الزرار غلط";
   if (node.url !== undefined && node.url !== "" && !/^https:\/\/[^\s]+$/.test(node.url)) return "الرابط لازم يبدأ بـ https://";
   if (node.items !== undefined && !Array.isArray(node.items)) return "items لازم تكون قايمة";
   if ((node.items || []).length > 12) return "الحد 12 زرار في القايمة الواحدة";
@@ -68,6 +69,20 @@ export default async function handler(req, res) {
 
     if (action === "stats") {
       return res.json(await getStats());
+    }
+
+    if (action === "questions") {
+      return res.json({ questions: await getQuestions() });
+    }
+
+    if (action === "delq") {
+      if (typeof ref !== "string" || ref.length > 1000) return res.status(400).json({ error: "سؤال غلط" });
+      await deleteQuestion(ref);
+      return res.json({ ok: true });
+    }
+
+    if (action === "presslog") {
+      return res.json({ log: await getPressLog() });
     }
 
     if (action === "reset") {

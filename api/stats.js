@@ -1,8 +1,7 @@
-// الإحصائيات في Upstash Redis (REST). أي فشل هنا ما يوقفش البوت أبداً
+// الإحصائيات والأسئلة وسجل الضغطات في Upstash Redis (REST). أي فشل ما يوقفش البوت
 const URL_R = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN_R = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 
-// تاريخ اليوم (أو أمس = -1) بتوقيت القاهرة
 export function dayKey(offset = 0) {
   const d = new Date(Date.now() + offset * 86400000);
   return d.toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
@@ -27,24 +26,36 @@ export async function trackVisitor(chatId, source) {
   if (source && source !== "direct") await redis(["HINCRBY", "stats:src", source, 1]);
 }
 
-// ضغطة على زرار: أمر واحد
-// بنسجل المسار + اسم الزرار وقت الضغط، عشان الإحصائيات تفضل تظهر بالاسم حتى لو الزرار اتغير أو اتحذف
+// ضغطة: عداد + سجل بالوقت (السجل بيتقص كل شوية عشان يوفر أوامر)
 export async function trackPress(path, label) {
-  const key = `${path}|${label || ""}`;
-  await redis(["HINCRBY", `stats:press:${todayKey()}`, key, 1]);
+  await redis(["HINCRBY", `stats:press:${todayKey()}`, `${path}|${label || ""}`, 1]);
+  const item = JSON.stringify({ t: Date.now(), p: path, l: label || "" });
+  await redis(["LPUSH", "presslog", item]);
+  if (Math.random() < 0.05) await redis(["LTRIM", "presslog", 0, 299]);
 }
 
-// تصفير كل الإحصائيات (آخر 90 يوم + الإجمالي)
-export async function resetStats() {
-  const keys = ["subs:all", "stats:src"];
-  for (let off = 0; off < 90; off++) {
-    const d = dayKey(-off);
-    keys.push(`subs:day:${d}`, `stats:press:${d}`);
-  }
-  await redis(["DEL", ...keys]);
+// سؤال من عميل: نص بس، من غير أي بيانات شخصية
+export async function pushQuestion(text) {
+  const item = JSON.stringify({ t: Date.now(), q: String(text).slice(0, 500) });
+  await redis(["LPUSH", "questions", item]);
+  if (Math.random() < 0.05) await redis(["LTRIM", "questions", 0, 499]);
 }
 
-// كل الأرقام للوحة التحكم: آخر 7 أيام + المقارنة بامبارح
+export async function getQuestions() {
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  return raw.map((r) => ({ raw: r, ...JSON.parse(r) }));
+}
+
+export async function deleteQuestion(raw) {
+  await redis(["LREM", "questions", 1, raw]);
+}
+
+export async function getPressLog() {
+  const raw = (await redis(["LRANGE", "presslog", 0, 299])) || [];
+  return raw.map((r) => JSON.parse(r));
+}
+
+// الأرقام للوحة التحكم: آخر 7 أيام + المقارنة بامبارح
 export async function getStats() {
   const perDay = await Promise.all(
     [6, 5, 4, 3, 2, 1, 0].map(async (off) => {
@@ -61,10 +72,8 @@ export async function getStats() {
     redis(["PFCOUNT", "subs:all"]),
     redis(["HGETALL", "stats:src"]),
   ]);
-
   const agg = {};
   perDay.forEach((d) => Object.entries(d.byPath).forEach(([k, v]) => (agg[k] = (agg[k] || 0) + v)));
-
   const today = perDay[6];
   const yesterday = perDay[5];
   return {
@@ -80,8 +89,17 @@ export async function getStats() {
   };
 }
 
-function sum(o) { return Object.values(o).reduce((a, b) => a + b, 0); }
+// تصفير: الإحصائيات + الضغطات (الأسئلة مش بتتصفر)
+export async function resetStats() {
+  const keys = ["subs:all", "stats:src", "presslog"];
+  for (let off = 0; off < 90; off++) {
+    const d = dayKey(-off);
+    keys.push(`subs:day:${d}`, `stats:press:${d}`);
+  }
+  await redis(["DEL", ...keys]);
+}
 
+function sum(o) { return Object.values(o).reduce((a, b) => a + b, 0); }
 function toObj(arr) {
   const o = {};
   for (let i = 0; i < (arr?.length || 0); i += 2) o[arr[i]] = Number(arr[i + 1]);
