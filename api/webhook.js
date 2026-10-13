@@ -104,7 +104,7 @@ bot.callbackQuery(/^ask:(.*)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     if ((await questionsLeft(ctx.chat.id)) <= 0) {
       const lm = content.messages?.limitReached || DEFAULT_LIMIT;
-      return ctx.reply(fill(lm, { max: MAX_QUESTIONS_COUNT }));
+      return ctx.reply(fill(lm, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(render(content, "").markup));
     }
     const left = await questionsLeft(ctx.chat.id);
     await ctx.reply((content.messages?.askPrompt) || DEFAULT_PROMPT, {
@@ -136,11 +136,12 @@ bot.on("message:text", async (ctx) => {
     }
     let allowed = true;
     try { allowed = await questionAllowed(ctx.chat.id); } catch {}
-    if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }));
+    if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(render(content, "").markup));
     try { await pushQuestion(ctx.message.text); } catch {}
     const left = await questionsLeft(ctx.chat.id).catch(() => 0);
     const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
-    return ctx.reply((m.askThanks || DEFAULT_THANKS) + tail);
+    // بعد السؤال نرجّع القايمة الرئيسية عشان العميل يكمل تصفح
+    return ctx.reply((m.askThanks || DEFAULT_THANKS) + tail, HTML_OPTS(render(content, "").markup));
   }
   // نرجّع القايمة الرئيسية مع الرد، عشان العميل يلاقي الأزرار تاني
   const { markup } = render(content, "");
