@@ -1,6 +1,10 @@
 // بوت تلجرام: قايمة + رجوع + رابط + زرار سؤال + تسجيل الإحصائيات بعد الرد
 import { Bot, InlineKeyboard, webhookCallback } from "grammy";
-import { trackVisitor, trackPress, pushQuestion } from "./stats.js";
+import { trackVisitor, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT } from "./stats.js";
+
+const DEFAULT_LIMIT = "استنفدت عدد الأسئلة المسموحة ({max}) خلال 24 ساعة 🙏\nتقدر تسأل تاني بعد 24 ساعة من أول سؤال.";
+const DEFAULT_LEFT = "(باقي لك {left} أسئلة خلال 24 ساعة)";
+const fill = (t, vars) => Object.entries(vars).reduce((a, [k, v]) => a.split("{" + k + "}").join(String(v)), t);
 
 const CONTENT_URL = process.env.CONTENT_URL;
 const bot = new Bot(process.env.BOT_TOKEN);
@@ -48,6 +52,22 @@ function render(node, path) {
   return { text: node.text, markup: kb };
 }
 
+// فلتر بسيط: الرسالة لازم تبان سؤال (علامة استفهام أو كلمة سؤال)
+const QUESTION_WORDS = [
+  "ازاي", "إزاي", "ازّاي", "امتى", "إمتى", "فين", "فينن", "ايه", "إيه", "اي", "ايوه", "هل", "كام", "كم",
+  "ممكن", "عايز", "عاوز", "عايزة", "عاوزه", "محتاج", "محتاجة", "لو سمحت", "مين", "ليه", "علشان", "عشان",
+  "عنوان", "موعد", "مواعيد", "سعر", "تكلفة", "فيه", "فيها", "متاح", "متاحة", "بيفتح", "بيقفل", "بيشتغل",
+  "ينفع", "لازم", "المستندات", "مستندات", "أعرف", "اعرف", "اعرّف", "قولي", "قوللي", "ابعتلي", "احجز", "أحجز",
+  "اقرب", "أقرب", "لجنة", "لجان", "الكشف", "كشف", "نتيجة", "طلب", "تأجيل", "الغاء", "إلغاء", "تعديل",
+];
+function looksLikeQuestion(text = "") {
+  const t = text.trim();
+  if (t.length < 4) return false;
+  const low = " " + t.toLowerCase().replace(/[.,!؟?]/g, " ") + " ";
+  // نطابق الكلمة كاملة (عشان "اهلا" ما تتحسبش سؤال بسبب "هل")
+  return QUESTION_WORDS.some((w) => low.includes(" " + w + " "));
+}
+
 const HTML_OPTS = (markup) => ({
   parse_mode: "HTML",
   reply_markup: markup,
@@ -82,6 +102,11 @@ bot.callbackQuery(/^ask:(.*)$/, async (ctx) => {
     const content = await getContent();
     const node = getNode(content, path);
     await ctx.answerCallbackQuery();
+    if ((await questionsLeft(ctx.chat.id)) <= 0) {
+      const lm = content.messages?.limitReached || DEFAULT_LIMIT;
+      return ctx.reply(fill(lm, { max: MAX_QUESTIONS_COUNT }));
+    }
+    const left = await questionsLeft(ctx.chat.id);
     await ctx.reply((content.messages?.askPrompt) || DEFAULT_PROMPT, {
       reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
     });
@@ -99,8 +124,19 @@ bot.on("message:text", async (ctx) => {
   const r = ctx.message.reply_to_message;
   const rText = (r && r.text) || "";
   if (r && r.from?.is_bot && (rText === prompt || rText.startsWith("اكتب سؤالك"))) {
+    if (!looksLikeQuestion(ctx.message.text)) {
+      // مش سؤال واضح: نطلب منه يكتبه تاني
+      return ctx.reply("مش واضح إنه سؤال، اكتب سؤالك بشكل واضح، مثلاً: ممكن أعرف عنوان لجنة القاهرة؟", {
+        reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
+      });
+    }
+    let allowed = true;
+    try { allowed = await questionAllowed(ctx.chat.id); } catch {}
+    if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }));
     try { await pushQuestion(ctx.message.text); } catch {}
-    return ctx.reply(m.askThanks || DEFAULT_THANKS);
+    const left = await questionsLeft(ctx.chat.id).catch(() => 0);
+    const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
+    return ctx.reply((m.askThanks || DEFAULT_THANKS) + tail);
   }
   // نرجّع القايمة الرئيسية مع الرد، عشان العميل يلاقي الأزرار تاني
   const { markup } = render(content, "");

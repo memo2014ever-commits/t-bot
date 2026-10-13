@@ -41,6 +41,31 @@ export async function pushQuestion(text) {
   if (Math.random() < 0.05) await redis(["LTRIM", "questions", 0, 499]);
 }
 
+import { createHash } from "crypto";
+const MAX_QUESTIONS = 3;          // عدد الأسئلة المسموحة لكل عميل
+const WINDOW_SECONDS = 86400;     // كل 24 ساعة
+
+function qKey(chatId) {
+  const id = createHash("sha256").update(String(chatId)).digest("hex").slice(0, 16);
+  return `qrate:${id}`;
+}
+
+// كام سؤال باقي للعميل (من غير ما يزود العداد)
+export async function questionsLeft(chatId) {
+  const used = Number((await redis(["GET", qKey(chatId)])) ?? 0);
+  return Math.max(0, MAX_QUESTIONS - used);
+}
+
+// بيزود العداد لما العميل يبعت سؤال فعلاً، ويرجع true لو لسه فيه حد
+export async function questionAllowed(chatId) {
+  const key = qKey(chatId);
+  const n = await redis(["INCR", key]);
+  if (n === 1) await redis(["EXPIRE", key, WINDOW_SECONDS]);
+  return (n ?? 0) <= MAX_QUESTIONS;
+}
+
+export const MAX_QUESTIONS_COUNT = MAX_QUESTIONS;
+
 export async function getQuestions() {
   const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
   return raw.map((r) => ({ raw: r, ...JSON.parse(r) }));
