@@ -24,6 +24,7 @@ function norm(t = "") {
   return String(t).toLowerCase()
     .replace(/[\u064B-\u0652\u0640]/g, "")
     .replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه")
+    .replace(/[،؛؟,.!:()\[\]"«»-]/g, " ")
     .replace(/[^\u0600-\u06FFa-z0-9\s]/g, " ")
     .replace(/\s+/g, " ").trim();
 }
@@ -42,22 +43,43 @@ function walk(node, path = "", out = []) {
   return out;
 }
 
-// يدور على الزراير بكلماتها، ويرجع أعلى تطابق بس
+// كلمات عامة ما ينفعش تحدد زرار (زي فين، ازاي، لجنة)
+const COMMON = new Set([
+  "ازاي", "امتى", "فين", "ايه", "هل", "كام", "ممكن", "عايز", "عاوز", "محتاج", "عنوان", "موعد", "مواعيد",
+  "سعر", "لجنة", "لجان", "مكان", "موقع", "اعرف", "ليه", "مين", "لو", "سمحت", "علشان", "عشان",
+].map(norm));
+
+function distinctTokens(text) {
+  return [...new Set(norm(text).split(" ").filter((t) => t.length >= 3 && !COMMON.has(t)))];
+}
+
+// يدور في: اسم الزرار + كلمات الاستدعاء (وزنهم 2)، ونص الرسالة (وزنه 1)
+// بيرجع الأدق أولاً، وحد أقصى 5
 function searchNodes(content, text) {
   if (norm(text).length < 2) return [];
   const t = padded(text);
+  const qt = distinctTokens(text);
   const hits = [];
   for (const { path, node } of walk(content)) {
     if (path === "" || node.action === "ask") continue;
     if (!node.text && !node.url && !(node.items || []).length) continue;
-    // نشيل التكرار: لو الكلمة في الاسم وفي الاستدعاء، تتحسب مرة واحدة بس
     const kws = [...new Set([node.label, ...(Array.isArray(node.keywords) ? node.keywords : [])]
       .map(norm).filter((k) => k.length >= 2))];
-    const score = kws.filter((k) => t.includes(" " + k + " ")).length;
-    if (score > 0) hits.push({ path, node, score });
+    const nameScore = kws.filter((k) => t.includes(" " + k + " ")).length * 2;
+
+    let snippet = "";
+    let textScore = 0;
+    const lines = String(node.text || "").split("\n");
+    for (const tok of qt) {
+      const line = lines.find((l) => norm(l).split(" ").includes(tok));
+      if (line) { textScore++; if (!snippet) snippet = line.trim(); }
+    }
+    const score = nameScore + textScore;
+    if (score > 0) {
+      hits.push({ path, node, score, matchedIn: nameScore > 0 ? "name" : "text", snippet });
+    }
   }
-  // أي تطابق مع أكتر من زرار = سؤال "تقصد؟"، الترتيب بالأعلى تطابق بس
-  return hits.sort((a, b) => b.score - a.score);
+  return hits.sort((x, y) => y.score - x.score).slice(0, 5);
 }
 
 let cache = null;
@@ -182,6 +204,10 @@ async function showHit(ctx, hit) {
     return ctx.reply(toHtml(hit.node.text || hit.node.label), HTML_OPTS(kb));
   }
   const { text, markup } = render(hit.node, hit.path);
+  // لو المطابقة في النص: نعرض السطر اللي فيه المعلومة بس، ومعاه اسم المكان
+  if (hit.matchedIn === "text" && hit.snippet) {
+    return ctx.reply(toHtml(`📍 ${hit.node.label}\n${hit.snippet}`), HTML_OPTS(markup));
+  }
   return ctx.reply(toHtml(text), HTML_OPTS(markup));
 }
 
@@ -197,7 +223,20 @@ bot.on("message:text", async (ctx) => {
     return ctx.reply(toHtml(m.medical || DEFAULT_MEDICAL), HTML_OPTS(root));
   }
 
-  // 2) رد على خانة السؤال
+  // 2) بحث في المحتوى (زراير + استدعاء + نص)، قبل أي فلتر
+  const hits = searchNodes(content, text);
+  if (hits.length === 1) return showHit(ctx, hits[0]);
+  if (hits.length > 1) {
+    const kb = new InlineKeyboard();
+    hits.forEach((h) => {
+      if (h.node.url) kb.url(h.node.label, h.node.url).row();
+      else kb.text(h.node.label, `n:${h.path}`).row();
+    });
+    const lines = hits.map((h) => choiceLine(content, h)).join("\n");
+    return ctx.reply(toHtml((m.didYouMean || DEFAULT_DYM) + "\n\n" + lines), HTML_OPTS(kb));
+  }
+
+  // 3) رد على خانة السؤال: يتسجل كسؤال لو اجتاز الفلتر
   const r = ctx.message.reply_to_message;
   const rText = (r && r.text) || "";
   const prompt = m.askPrompt || DEFAULT_PROMPT;
@@ -217,20 +256,6 @@ bot.on("message:text", async (ctx) => {
     const left = await questionsLeft(ctx.chat.id).catch(() => 0);
     const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
     return ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
-  }
-
-  // 3) بحث بالكلمات في الزراير
-  const hits = searchNodes(content, text);
-  if (hits.length === 1) return showHit(ctx, hits[0]);
-  if (hits.length > 1) {
-    const top = hits.slice(0, 4);
-    const kb = new InlineKeyboard();
-    top.forEach((h) => {
-      if (h.node.url) kb.url(h.node.label, h.node.url).row();
-      else kb.text(h.node.label, `n:${h.path}`).row();
-    });
-    const lines = top.map((h) => choiceLine(content, h)).join("\n");
-    return ctx.reply(toHtml((m.didYouMean || DEFAULT_DYM) + "\n\n" + lines), HTML_OPTS(kb));
   }
 
   // 4) مفيش تطابق: رد عام مع القايمة
