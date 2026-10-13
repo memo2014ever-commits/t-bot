@@ -115,6 +115,12 @@ export default async function handler(req, res) {
     if (action === "save") {
       const err = validate(content);
       if (err) return res.status(400).json({ error: err });
+      if (content.messages !== undefined) {
+        if (typeof content.messages !== "object") return res.status(400).json({ error: "رسايل النظام غلط" });
+        for (const v of Object.values(content.messages)) {
+          if (typeof v !== "string" || v.length > 500) return res.status(400).json({ error: "رسالة نظام طويلة أو غلط (الحد 500 حرف)" });
+        }
+      }
 
       const cur = await readCurrent();
       // المحرر ما يقدرش يحذف: لو عدد الزراير قل، نرفض

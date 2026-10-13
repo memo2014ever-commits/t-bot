@@ -4,7 +4,9 @@ import { trackVisitor, trackPress, pushQuestion } from "./stats.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
 const bot = new Bot(process.env.BOT_TOKEN);
-const ASK_PROMPT = "اكتب سؤالك هنا";
+const DEFAULT_PROMPT = "اكتب سؤالك هنا 👇";
+const DEFAULT_THANKS = "استلمنا سؤالك، شكراً لتواصلك 🌷";
+const DEFAULT_FALLBACK = "اختار من الأزرار تحت 👇";
 
 let cache = null;
 let cacheTime = 0;
@@ -35,7 +37,7 @@ function toHtml(text = "") {
 function render(node, path) {
   const kb = new InlineKeyboard();
   (node.items || []).forEach((item, i) => {
-    if (item.action === "ask") kb.text(item.label, "ask").row();          // زرار سؤال
+    if (item.action === "ask") kb.text(item.label, `ask:${path ? path + "." : ""}${i}`).row(); // زرار سؤال
     else if (item.url) kb.url(item.label, item.url).row();                 // زرار رابط
     else kb.text(item.label, `n:${path ? path + "." : ""}${i}`).row();     // قايمة فرعية
   });
@@ -73,23 +75,34 @@ async function showNode(ctx, path, track) {
 bot.callbackQuery(/^n:(.*)$/, (ctx) => showNode(ctx, ctx.match[1], true));
 bot.callbackQuery(/^b:(.*)$/, (ctx) => showNode(ctx, ctx.match[1], false));
 
-// زرار "ابعت سؤالك": بيفتح خانة كتابة للعميل
-bot.callbackQuery("ask", async (ctx) => {
-  await ctx.answerCallbackQuery();
-  await ctx.reply(ASK_PROMPT + " 👇", {
-    reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
-  });
-  try { await trackPress("ask", "💬 ابعت سؤالك"); } catch {}
+// زرار "ابعت سؤالك": بيفتح خانة كتابة للعميل، وبيتحسب كضغطة زي أي زرار
+bot.callbackQuery(/^ask:(.*)$/, async (ctx) => {
+  const path = ctx.match[1];
+  try {
+    const content = await getContent();
+    const node = getNode(content, path);
+    await ctx.answerCallbackQuery();
+    await ctx.reply((content.messages?.askPrompt) || DEFAULT_PROMPT, {
+      reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
+    });
+    try { await trackPress(path, node.label); } catch {}
+  } catch {
+    await ctx.answerCallbackQuery({ text: "المحتوى اتغير، ابعت /start", show_alert: true });
+  }
 });
 
 // الرد على الرسايل النصية: لو رد على خانة السؤال، يتسجل كسؤال
 bot.on("message:text", async (ctx) => {
+  const content = await getContent().catch(() => ({}));
+  const m = content.messages || {};
+  const prompt = m.askPrompt || DEFAULT_PROMPT;
   const r = ctx.message.reply_to_message;
-  if (r && r.from?.is_bot && (r.text || "").startsWith(ASK_PROMPT)) {
+  const rText = (r && r.text) || "";
+  if (r && r.from?.is_bot && (rText === prompt || rText.startsWith("اكتب سؤالك"))) {
     try { await pushQuestion(ctx.message.text); } catch {}
-    return ctx.reply("استلمنا سؤالك، شكراً لتواصلك 🌷");
+    return ctx.reply(m.askThanks || DEFAULT_THANKS);
   }
-  return ctx.reply("اختار من الأزرار تحت 👇");
+  return ctx.reply(m.fallback || DEFAULT_FALLBACK);
 });
 
 export default webhookCallback(bot, "https");
