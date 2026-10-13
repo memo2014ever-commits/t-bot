@@ -717,7 +717,7 @@ function renderNode(node, parent, depth, index) {
     e.preventDefault(); e.stopPropagation();
     removeNode(src);
     node.items = node.items || [];
-    if (node.items.length >= 50) { toast("الحد 12 زرار في القايمة", "bad"); return; }
+    if (node.items.length >= 50) { toast("الحد 50 زرار في القايمة", "bad"); return; }
     node.items.push(src);
     window._drag = null;
     markDirty();
