@@ -45,7 +45,7 @@ function validate(node, isRoot = true, depth = 0) {
   }
   if (node.url !== undefined && node.url !== "" && !/^https:\/\/[^\s]+$/.test(node.url)) return "الرابط لازم يبدأ بـ https://";
   if (node.items !== undefined && !Array.isArray(node.items)) return "items لازم تكون قايمة";
-  if ((node.items || []).length > 12) return "الحد 12 زرار في القايمة الواحدة";
+  if ((node.items || []).length > 12) return "الحد 50 زرار في القايمة الواحدة";
   for (const child of node.items || []) {
     const err = validate(child, false, depth + 1);
     if (err) return err;
