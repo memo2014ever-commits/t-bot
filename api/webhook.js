@@ -62,7 +62,7 @@ bot.callbackQuery(/^n:(.*)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.reply(toHtml(text), { parse_mode: "HTML", reply_markup: markup, link_preview_options: { is_disabled: true } });
     // التسجيل بعد الرد
-    try { await trackPress(path); } catch {}
+    try { await trackPress(path, node.label); } catch {}
   } catch {
     await ctx.answerCallbackQuery({ text: "المحتوى اتغير، ابعت /start", show_alert: true });
   }

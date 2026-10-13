@@ -28,9 +28,20 @@ export async function trackVisitor(chatId, source) {
 }
 
 // ضغطة على زرار: أمر واحد
-export async function trackPress(path) {
-  const label = path === "" ? "home" : path;
-  await redis(["HINCRBY", `stats:press:${todayKey()}`, label, 1]);
+// بنسجل المسار + اسم الزرار وقت الضغط، عشان الإحصائيات تفضل تظهر بالاسم حتى لو الزرار اتغير أو اتحذف
+export async function trackPress(path, label) {
+  const key = `${path}|${label || ""}`;
+  await redis(["HINCRBY", `stats:press:${todayKey()}`, key, 1]);
+}
+
+// تصفير كل الإحصائيات (آخر 90 يوم + الإجمالي)
+export async function resetStats() {
+  const keys = ["subs:all", "stats:src"];
+  for (let off = 0; off < 90; off++) {
+    const d = dayKey(-off);
+    keys.push(`subs:day:${d}`, `stats:press:${d}`);
+  }
+  await redis(["DEL", ...keys]);
 }
 
 // كل الأرقام للوحة التحكم: آخر 7 أيام + المقارنة بامبارح

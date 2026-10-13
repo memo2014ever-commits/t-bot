@@ -1,7 +1,7 @@
 // خادم لوحة التحكم: تسجيل دخول بدورين (أدمن / محرر)، وقراءة وحفظ وسجل نسخ من GitHub
 // كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
 import { timingSafeEqual } from "crypto";
-import { getStats } from "./stats.js";
+import { getStats, resetStats } from "./stats.js";
 
 const {
   ADMIN_USER, ADMIN_PASS,          // الأدمن: يعدّل ويحذف
@@ -68,6 +68,12 @@ export default async function handler(req, res) {
 
     if (action === "stats") {
       return res.json(await getStats());
+    }
+
+    if (action === "reset") {
+      if (role !== "admin") return res.status(403).json({ error: "التصفير للأدمن بس" });
+      await resetStats();
+      return res.json({ ok: true });
     }
 
     if (action === "history") {
