@@ -350,6 +350,12 @@
       "items": []
     },
     {
+      "label": "اضغط هنا لـلدخول إلي صفحتنا علي فيس بوك ",
+      "text": "",
+      "items": [],
+      "url": "https://www.facebook.com/legan19806"
+    },
+    {
       "label": "💬 ابعت سؤالك",
       "action": "ask",
       "text": "",
