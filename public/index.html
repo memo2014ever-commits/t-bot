@@ -749,8 +749,30 @@ function statLabel(key) {
   return same ? l : `${l} (اتغير أو اتحذف)`;
 }
 
+function typedConfirm(text, word) {
+  return new Promise((resolve) => {
+    const bg = document.createElement("div");
+    bg.className = "modal-bg";
+    bg.innerHTML = `<div class="modal"><p></p>
+      <input id="tc" placeholder="اكتب ${word} عشان تأكد">
+      <div class="row" style="margin-top:12px">
+        <button class="danger" id="tcOk" disabled>تصفير نهائي</button>
+        <button class="ghost" id="tcNo">إلغاء</button></div></div>`;
+    bg.querySelector("p").textContent = text;
+    document.body.appendChild(bg);
+    const inp = bg.querySelector("#tc"), ok = bg.querySelector("#tcOk");
+    inp.oninput = () => { ok.disabled = inp.value.trim() !== word; };
+    ok.onclick = () => { bg.remove(); resolve(true); };
+    bg.querySelector("#tcNo").onclick = () => { bg.remove(); resolve(false); };
+    bg.onclick = (e) => { if (e.target === bg) { bg.remove(); resolve(false); } };
+    inp.focus();
+  });
+}
+
 async function resetAllStats() {
-  const ok = await confirmBox("هتتصفر كل الإحصائيات (الضغطات والمشتركين والمصادر). مش هيتأثر البوت ولا المحتوى. متأكد؟", "تصفير", true);
+  const ok = await typedConfirm(
+    "هتتصفر كل الإحصائيات (الضغطات والمشتركين والمصادر). مش هيتأثر البوت ولا المحتوى، ومينفعش تترجع.",
+    "تصفير");
   if (!ok) return;
   try {
     await api("reset");
