@@ -178,6 +178,7 @@
             <button class="ok" onclick="save()">💾 حفظ وتحديث البوت</button>
             <button class="ghost" onclick="previewRoot()">👁 معاينة القايمة الرئيسية</button>
             <button class="ghost" onclick="discard()">↩️ تراجع لآخر نسخة محفوظة</button>
+            <button class="ghost" onclick="openSystemMessages()">⚙️ رسايل النظام</button>
           </div>
           <span id="status" class="status"></span>
         </div>
@@ -442,19 +443,22 @@ function parentPath(p) {
   return p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : "";
 }
 
-// كارت رسايل النظام: نصوص البوت اللي مش مرتبطة بزرار
-function systemCard() {
+// نافذة رسايل النظام: بتتفتح بزرار في الشريط فوق
+function openSystemMessages() {
   if (!data.messages) data.messages = {};
   const m = data.messages;
-  const card = document.createElement("div");
-  card.className = "card";
-  card.innerHTML = `<h2>⚙️ رسايل النظام</h2>
-    <p class="muted" style="margin-top:-6px">الرسايل دي بتظهر للعميل في حالات معينة. سيب الخانة فاضية عشان ترجع للرسالة الافتراضية.</p>`;
   const fields = [
     ["askPrompt", "💬 الرسالة اللي بتظهر لما العميل يدوس زرار السؤال", "اكتب سؤالك هنا 👇"],
     ["askThanks", "🌷 الرسالة اللي بتظهر بعد ما العميل يبعت سؤاله", "استلمنا سؤالك، شكراً لتواصلك 🌷"],
     ["fallback", "👇 الرد لما العميل يكتب كلام عادي (مش سؤال)", "اختار من الأزرار تحت 👇"],
   ];
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  const box = document.createElement("div");
+  box.className = "modal";
+  box.style.width = "min(560px,100%)";
+  box.innerHTML = `<h2 style="margin:0 0 6px">⚙️ رسايل النظام</h2>
+    <p class="muted" style="margin:0 0 10px">سيب الخانة فاضية عشان ترجع للرسالة الافتراضية (موضحة تحت كل خانة).</p>`;
   fields.forEach(([key, label, def]) => {
     const lb = document.createElement("label");
     lb.className = "f";
@@ -464,9 +468,16 @@ function systemCard() {
     ta.placeholder = "الافتراضي: " + def;
     ta.value = m[key] || "";
     ta.oninput = () => { if (ta.value.trim()) m[key] = ta.value; else delete m[key]; markDirty(); };
-    card.append(lb, ta);
+    box.append(lb, ta);
   });
-  return card;
+  const close = document.createElement("button");
+  close.textContent = "تم";
+  close.style.marginTop = "12px";
+  close.onclick = () => bg.remove();
+  box.appendChild(close);
+  bg.appendChild(box);
+  bg.addEventListener("click", (e) => { if (e.target === bg) bg.remove(); });
+  document.body.appendChild(bg);
 }
 
 function navBar() {
@@ -546,7 +557,6 @@ function draw() {
   const parent = currentPath === "" ? null : getNodeByPath(parentPath(currentPath));
   const index = currentPath === "" ? 0 : Number(currentPath.split(".").pop());
 
-  t.appendChild(systemCard());
   t.appendChild(navBar());
   t.appendChild(renderNode(node, parent, depth, index));
 }
