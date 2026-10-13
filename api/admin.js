@@ -39,6 +39,10 @@ function validate(node, isRoot = true, depth = 0) {
   if (node.text.length > 3500) return "نص طويل جداً (الحد 3500 حرف)";
   if (!isRoot && (!node.label || typeof node.label !== "string")) return "فيه زرار من غير اسم";
   if (node.action !== undefined && node.action !== "ask") return "نوع الزرار غلط";
+  if (node.keywords !== undefined && (!Array.isArray(node.keywords) || node.keywords.length > 30 ||
+      node.keywords.some((k) => typeof k !== "string" || k.length > 40))) {
+    return "كلمات الاستدعاء لازم تكون قايمة كلمات قصيرة (حد 30 كلمة)";
+  }
   if (node.url !== undefined && node.url !== "" && !/^https:\/\/[^\s]+$/.test(node.url)) return "الرابط لازم يبدأ بـ https://";
   if (node.items !== undefined && !Array.isArray(node.items)) return "items لازم تكون قايمة";
   if ((node.items || []).length > 12) return "الحد 12 زرار في القايمة الواحدة";
@@ -115,6 +119,12 @@ export default async function handler(req, res) {
     if (action === "save") {
       const err = validate(content);
       if (err) return res.status(400).json({ error: err });
+      if (content.medicalKeywords !== undefined) {
+        if (!Array.isArray(content.medicalKeywords) || content.medicalKeywords.length > 100 ||
+            content.medicalKeywords.some((w) => typeof w !== "string" || w.length > 40)) {
+          return res.status(400).json({ error: "كلمات الطب لازم تكون قايمة كلمات قصيرة (حد 100 كلمة)" });
+        }
+      }
       if (content.questionWords !== undefined) {
         if (!Array.isArray(content.questionWords) || content.questionWords.length > 200 ||
             content.questionWords.some((w) => typeof w !== "string" || w.length > 30)) {
