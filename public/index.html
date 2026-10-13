@@ -717,7 +717,7 @@ function renderNode(node, parent, depth, index) {
     e.preventDefault(); e.stopPropagation();
     removeNode(src);
     node.items = node.items || [];
-    if (node.items.length >= 12) { toast("الحد 12 زرار في القايمة", "bad"); return; }
+    if (node.items.length >= 50) { toast("الحد 12 زرار في القايمة", "bad"); return; }
     node.items.push(src);
     window._drag = null;
     markDirty();
@@ -747,7 +747,7 @@ function renderNode(node, parent, depth, index) {
   askBtn.title = "بيضيف زرار جديد جوه القايمة دي: العميل يدوسه ويكتب سؤاله";
   askBtn.onclick = () => {
     if (depth >= 4) return toast("الحد الأقصى 4 مستويات", "bad");
-    if ((node.items || []).length >= 12) return toast("الحد 12 زرار في القايمة", "bad");
+    if ((node.items || []).length >= 50) return toast("الحد 12 زرار في القايمة", "bad");
     node.items = node.items || [];
     node.items.push({ label: "💬 ابعت سؤالك", action: "ask", text: "", items: [] });
     markDirty();
@@ -758,7 +758,7 @@ function renderNode(node, parent, depth, index) {
   addBtn.textContent = "➕ زرار جوه";
   addBtn.onclick = () => {
     if (depth >= 4) return toast("الحد الأقصى 4 مستويات", "bad");
-    if ((node.items || []).length >= 12) return toast("الحد 12 زرار في القايمة", "bad");
+    if ((node.items || []).length >= 50) return toast("الحد 12 زرار في القايمة", "bad");
     node.items = node.items || [];
     node.items.push({ label: "زرار جديد", text: "", items: [] });
     markDirty();
