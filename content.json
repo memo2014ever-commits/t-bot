@@ -60,6 +60,19 @@
           "items": []
         }
       ]
+    },
+    {
+      "label": "💬 ابعت سؤالك",
+      "action": "ask",
+      "text": "",
+      "items": [
+        {
+          "label": "💬 ابعت سؤالك",
+          "action": "ask",
+          "text": "",
+          "items": []
+        }
+      ]
     }
   ]
 }
