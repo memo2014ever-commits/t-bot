@@ -205,6 +205,9 @@
         <li><b>➕ زرار جوه</b> بيضيف زرار تحت العنصر ده. الحد 4 مستويات و12 زرار في القايمة.</li>
         <li><b>⬆️ ⬇️</b> بيرتبوا الزراير، و<b>📄</b> بيكرر الزرار بكل محتواه.</li>
         <li><b>👁</b> بيعرض شكل الرسالة زي ما هتظهر في تلجرام قبل الحفظ.</li>
+        <li><b>كلمة تفتح رابط داخل النص:</b> اكتب في النص <code>[اضغط هنا](https://...)</code>، وتظهر كلمة "اضغط هنا" قابلة للضغط.</li>
+        <li><b>زرار يفتح رابط تحت الرسالة:</b> املى خانة "🔗 رابط" في الزرار.</li>
+        <li><b>القوايم بتتفتح وتتقفل</b> بالضغط على اسمها (زي dropdown).</li>
         <li><b>💾</b> الزرار اللي تحت كل عنصر بيحفظ الشجرة كلها.</li>
         <li>النصوص اللي بين <b>[ ]</b> لازم تتملى بالمعلومة الرسمية قبل النشر.</li>
         <li>بعد الحفظ استنى دقيقة أو اتنين، وابعت /start للبوت من جديد.</li>
@@ -396,6 +399,15 @@ function draw() {
 
 function onSearch(v) { query = v; draw(); }
 
+const openSet = new WeakSet();   // حالة الفتح/القفل بس، مش بتتحفظ في الملف
+function isOpen(node, depth) {
+  return depth === 0 || !!query.trim() || openSet.has(node);
+}
+function toggleOpen(node) {
+  openSet.has(node) ? openSet.delete(node) : openSet.add(node);
+  draw();
+}
+
 function renderNode(node, parent, depth, index) {
   const isRoot = depth === 0;
   const wrap = document.createElement("div");
@@ -410,6 +422,12 @@ function renderNode(node, parent, depth, index) {
   const title = document.createElement("div");
   title.className = "title";
   title.textContent = isRoot ? "🏠 القايمة الرئيسية (أول رسالة)" : (node.label || "زرار بدون اسم");
+  const hasKids = (node.items || []).length > 0;
+  if (hasKids) {
+    title.style.cursor = "pointer";
+    title.textContent = (isOpen(node, depth) ? "▾ " : "▸ ") + title.textContent;
+    title.onclick = () => { if (!isRoot) toggleOpen(node); else toggleOpen(node); };
+  }
   head.appendChild(title);
   if (!isRoot) {
     const badge = document.createElement("span");
@@ -541,7 +559,7 @@ function renderNode(node, parent, depth, index) {
   }
   wrap.appendChild(actions);
 
-  if (node.items && node.items.length) {
+  if (node.items && node.items.length && isOpen(node, depth)) {
     const ch = document.createElement("div");
     ch.className = "children";
     node.items.forEach((c, i) => {
@@ -549,7 +567,7 @@ function renderNode(node, parent, depth, index) {
       ch.appendChild(renderNode(c, node, depth + 1, i));
     });
     wrap.appendChild(ch);
-  } else if (!isRoot) {
+  } else if (!isRoot && !hasKids) {
     const e = document.createElement("div");
     e.className = "empty";
     e.textContent = "الزرار ده بيعرض نصه بس. ضيف زرار جوه لو عايز قايمة فرعية.";
