@@ -50,14 +50,14 @@ function searchNodes(content, text) {
   for (const { path, node } of walk(content)) {
     if (path === "" || node.action === "ask") continue;
     if (!node.text && !node.url && !(node.items || []).length) continue;
-    const kws = [node.label, ...(Array.isArray(node.keywords) ? node.keywords : [])]
-      .map(norm).filter((k) => k.length >= 2);
+    // نشيل التكرار: لو الكلمة في الاسم وفي الاستدعاء، تتحسب مرة واحدة بس
+    const kws = [...new Set([node.label, ...(Array.isArray(node.keywords) ? node.keywords : [])]
+      .map(norm).filter((k) => k.length >= 2))];
     const score = kws.filter((k) => t.includes(" " + k + " ")).length;
     if (score > 0) hits.push({ path, node, score });
   }
-  if (!hits.length) return [];
-  const top = Math.max(...hits.map((h) => h.score));
-  return hits.filter((h) => h.score === top);
+  // أي تطابق مع أكتر من زرار = سؤال "تقصد؟"، الترتيب بالأعلى تطابق بس
+  return hits.sort((a, b) => b.score - a.score);
 }
 
 let cache = null;
