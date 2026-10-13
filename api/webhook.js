@@ -41,7 +41,7 @@ function render(node, path) {
   });
   if (path !== "") {
     const parent = path.includes(".") ? path.slice(0, path.lastIndexOf(".")) : "";
-    kb.text("🔙 رجوع", `n:${parent}`);
+    kb.text("🔙 رجوع", `b:${parent}`);   // b: = رجوع (مابتتحسبش كضغطة)
   }
   return { text: node.text, markup: kb };
 }
@@ -53,20 +53,21 @@ bot.command("start", async (ctx) => {
   try { await trackVisitor(ctx.chat.id, ctx.match || "direct"); } catch {}
 });
 
-bot.callbackQuery(/^n:(.*)$/, async (ctx) => {
-  const path = ctx.match[1];
+async function showNode(ctx, path, track) {
   try {
     const node = getNode(await getContent(), path);
     const { text, markup } = render(node, path);
-    // نبعت رسالة جديدة (زي أي بوت طبيعي) بدل ما نعدّل القايمة
     await ctx.answerCallbackQuery();
     await ctx.reply(toHtml(text), { parse_mode: "HTML", reply_markup: markup, link_preview_options: { is_disabled: true } });
-    // التسجيل بعد الرد
-    try { await trackPress(path, node.label); } catch {}
+    // التسجيل بعد الرد (الرجوع ما بيتسجلش)
+    if (track) { try { await trackPress(path, node.label); } catch {} }
   } catch {
     await ctx.answerCallbackQuery({ text: "المحتوى اتغير، ابعت /start", show_alert: true });
   }
-});
+}
+
+bot.callbackQuery(/^n:(.*)$/, (ctx) => showNode(ctx, ctx.match[1], true));
+bot.callbackQuery(/^b:(.*)$/, (ctx) => showNode(ctx, ctx.match[1], false));
 
 bot.on("message", (ctx) => ctx.reply("اختار من الأزرار تحت 👇"));
 
