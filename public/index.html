@@ -450,25 +450,31 @@ function parentPath(p) {
   return p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : "";
 }
 
-// نافذة رسايل النظام: مقسمة حسب الوظيفة
+// نافذة رسايل النظام: كل قسم بيوضح إمتى بيظهر
 function openSystemMessages() {
   if (!data.messages) data.messages = {};
   const m = data.messages;
+  // كل خانة: [المفتاح، العنوان، شرح إمتى بتظهر، الافتراضي]
   const sections = [
-    ["🔍 البحث عن الإجابة", [
-      ["didYouMean", "لما يكون فيه أكتر من إجابة محتملة، والعميل يختار", "تقصد؟ اختار من دول 👇"],
+    ["🧾 الاستعلام عن الحجز", "بيظهر لما العميل يكتب كلام فيه استعلام عن موعده أو حجزه", [
+      ["inquiry", "📝 نص الرسالة", "الرسالة اللي بتظهر للعميل", "للاستعلام عن موعدك أو حجزك، ادخل على بوت الحجز مباشرة 👇"],
+      ["inquiryButtonText", "🔘 اسم الزرار تحت الرسالة (اختياري)", "لو فاضي، الرسالة بتظهر من غير زرار", "📅 فتح بوت الحجز"],
+      ["inquiryButtonUrl", "🔗 رابط الزرار (اختياري، لازم يبدأ بـ https://)", "الزرار بيفتح الرابط ده", "https://t.me/H19806bot"],
+    ], "inquiryKeywords"],
+    ["🔍 البحث عن الإجابة", "بيظهر لما الكلام يطابق أكتر من زرار", [
+      ["didYouMean", "📝 نص سؤال التوضيح (تقصد؟)", "قبل قايمة الاختيارات", "تقصد؟ اختار من دول 👇"],
     ]],
-    ["💬 الأسئلة", [
-      ["askPrompt", "الرسالة لما العميل يدوس زرار السؤال", "اكتب سؤالك هنا 👇"],
-      ["askThanks", "الرسالة بعد ما العميل يبعت سؤاله", "استلمنا سؤالك، شكراً لتواصلك 🌷"],
-      ["remaining", "الجملة اللي بتظهر بعد السؤال (اكتب {left} للرقم)", "(باقي لك {left} أسئلة خلال 24 ساعة)"],
-      ["limitReached", "لما العميل يخلص أسئلته (اكتب {max} للحد)", "استنفدت عدد الأسئلة المسموحة ({max}) خلال 24 ساعة 🙏"],
+    ["💬 الأسئلة", "بتتعلق بزرار ابعت سؤالك", [
+      ["askPrompt", "📝 الرسالة لما العميل يدوس زرار السؤال", "بتظهر ومعاها خانة الكتابة", "اكتب سؤالك هنا 👇"],
+      ["askThanks", "✅ الرسالة بعد ما السؤال يتسجل", "بتظهر بعد ما العميل يبعت سؤاله", "استلمنا سؤالك، شكراً لتواصلك 🌷"],
+      ["remaining", "🔢 الجملة اللي بتتكتب بعد الشكر (اكتب {left} للرقم)", "بتوضح عدد الأسئلة الباقية", "(باقي لك {left} أسئلة خلال 24 ساعة)"],
+      ["limitReached", "🚫 لما العميل يخلص أسئلته (اكتب {max} للحد)", "بتظهر لما يوصل للحد اليومي", "استنفدت عدد الأسئلة المسموحة ({max}) خلال 24 ساعة 🙏"],
     ]],
-    ["🩺 الأسئلة الطبية", [
-      ["medical", "الرسالة لما السؤال يكون طبي (حالة أو علاج)", "السؤال ده محتاج متابعة طبية... للمساعدة اتصل بالخط الساخن 19806 📞"],
+    ["🩺 الأسئلة الطبية", "بتظهر لما السؤال يكون عن حالة أو علاج", [
+      ["medical", "📝 نص الرسالة", "بيحوّل العميل للخط الساخن", "السؤال ده محتاج متابعة طبية... للمساعدة اتصل بالخط الساخن 19806 📞"],
     ], "medicalKeywords"],
-    ["👇 عامة", [
-      ["fallback", "الرد لما العميل يكتب كلام مش مفهوم", "اختار من الأزرار تحت 👇"],
+    ["👇 الرد العام", "بيظهر لما الكلام ما يطابقش أي حاجة", [
+      ["fallback", "📝 نص الرسالة", "بيرجّع القايمة الرئيسية", "اختار من الأزرار تحت 👇"],
     ]],
   ];
 
@@ -476,42 +482,65 @@ function openSystemMessages() {
   bg.className = "modal-bg";
   const box = document.createElement("div");
   box.className = "modal";
-  box.style.width = "min(600px,100%)";
+  box.style.width = "min(620px,100%)";
   box.innerHTML = `<h2 style="margin:0 0 6px">⚙️ رسايل النظام</h2>
-    <p class="muted" style="margin:0 0 10px">كل قسم رسايله مرتبطة بوظيفة واحدة. سيب الخانة فاضية عشان ترجع للرسالة الافتراضية.</p>`;
+    <p class="muted" style="margin:0 0 6px">كل قسم بيوضح إمتى الرسالة بتظهر للعميل. سيب أي خانة فاضية عشان ترجع للافتراضي.</p>`;
 
-  sections.forEach(([title, fields, special]) => {
+  const listField = (labelText, placeholder, value, onChange) => {
+    const lb = document.createElement("label");
+    lb.className = "f";
+    lb.textContent = labelText;
+    const ta = document.createElement("textarea");
+    ta.rows = 2;
+    ta.placeholder = placeholder;
+    ta.value = value;
+    ta.oninput = () => onChange(ta.value);
+    box.append(lb, ta);
+  };
+
+  sections.forEach(([title, when, fields, special]) => {
     const h = document.createElement("h3");
-    h.style.cssText = "margin:16px 0 4px;color:var(--brand)";
+    h.style.cssText = "margin:18px 0 2px;color:var(--brand)";
     h.textContent = title;
     box.appendChild(h);
+    const w = document.createElement("div");
+    w.className = "muted";
+    w.style.marginBottom = "6px";
+    w.textContent = "⏱ " + when;
+    box.appendChild(w);
 
-    fields.forEach(([key, label, def]) => {
+    fields.forEach(([key, label, hint, def]) => {
       const lb = document.createElement("label");
       lb.className = "f";
-      lb.textContent = label;
-      const ta = document.createElement("textarea");
-      ta.rows = 2;
-      ta.placeholder = "الافتراضي: " + def;
-      ta.value = m[key] || "";
-      ta.oninput = () => { if (ta.value.trim()) m[key] = ta.value; else delete m[key]; markDirty(); };
-      box.append(lb, ta);
+      lb.textContent = label + " — " + hint;
+      const isUrl = key === "inquiryButtonUrl";
+      const el = isUrl ? document.createElement("input") : document.createElement("textarea");
+      if (!isUrl) el.rows = 2;
+      el.placeholder = "الافتراضي: " + def;
+      el.value = m[key] || "";
+      el.oninput = () => { if (el.value.trim()) m[key] = el.value.trim(); else delete m[key]; markDirty(); };
+      box.append(lb, el);
     });
 
+    if (special === "inquiryKeywords") {
+      listField("🔑 كلمات الاستعلام (بفاصلة) — لو العميل كتب أي كلمة منهم، الرد ده يظهر",
+        "الافتراضي: استعلم، استعلام، موعدي، حجزي، متابعة، حالة الطلب، رقم الطلب",
+        (data.inquiryKeywords || []).join("، "),
+        (v) => {
+          const list = v.split(/[،,]/).map((x) => x.trim()).filter(Boolean);
+          if (list.length) data.inquiryKeywords = list; else delete data.inquiryKeywords;
+          markDirty();
+        });
+    }
     if (special === "medicalKeywords") {
-      const lb = document.createElement("label");
-      lb.className = "f";
-      lb.textContent = "كلمات الأسئلة الطبية (بفاصلة). لو العميل كتب أي كلمة منهم، البوت يحوله للخط الساخن";
-      const ta = document.createElement("textarea");
-      ta.rows = 2;
-      ta.placeholder = "علاج، دوا، ألم، أعراض، مرض، جرعة، تشخيص، حساسية، حرارة";
-      ta.value = (data.medicalKeywords || []).join("، ");
-      ta.oninput = () => {
-        const list = ta.value.split(/[،,]/).map((w) => w.trim()).filter(Boolean);
-        if (list.length) data.medicalKeywords = list; else delete data.medicalKeywords;
-        markDirty();
-      };
-      box.append(lb, ta);
+      listField("🔑 كلمات الأسئلة الطبية (بفاصلة) — لو العميل كتب أي كلمة منهم، بيتحول للخط الساخن",
+        "علاج، دوا، ألم، أعراض، مرض، جرعة، تشخيص، حساسية، حرارة",
+        (data.medicalKeywords || []).join("، "),
+        (v) => {
+          const list = v.split(/[،,]/).map((x) => x.trim()).filter(Boolean);
+          if (list.length) data.medicalKeywords = list; else delete data.medicalKeywords;
+          markDirty();
+        });
     }
   });
 
