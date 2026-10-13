@@ -102,7 +102,9 @@ bot.on("message:text", async (ctx) => {
     try { await pushQuestion(ctx.message.text); } catch {}
     return ctx.reply(m.askThanks || DEFAULT_THANKS);
   }
-  return ctx.reply(m.fallback || DEFAULT_FALLBACK);
+  // نرجّع القايمة الرئيسية مع الرد، عشان العميل يلاقي الأزرار تاني
+  const { markup } = render(content, "");
+  return ctx.reply(toHtml(m.fallback || DEFAULT_FALLBACK), HTML_OPTS(markup));
 });
 
 export default webhookCallback(bot, "https");
