@@ -960,6 +960,16 @@ async function resetAllStats() {
 }
 
 let lastStats = null;
+let lastUnmatched = [];
+
+function exportUnmatched() {
+  csvDownload(`الكلمات_غير_المتطابقة_${today()}.csv`, [["الكلمة", "عدد مرات الكتابة"], ...lastUnmatched.map((w) => [w.word, w.count])]);
+}
+
+function exportHours() {
+  const hrs = (lastStats && lastStats.hours) || {};
+  csvDownload(`أوقات_الذروة_${today()}.csv`, [["الساعة", "الضغطات"], ...Array.from({ length: 24 }, (_, h) => [`${h}:00`, Number(hrs[h] || 0)])]);
+}
 
 // نفس فلتر العرض: الزراير الموجودة بس
 function currentUsed(st) {
@@ -1173,6 +1183,19 @@ async function loadStats() {
       ? '<div class="delta muted">مفيش بيانات امبارح للمقارنة</div>'
       : `<div class="delta ${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "▲" : "▼"} ${Math.abs(delta)}% عن امبارح</div>`;
 
+    // أوقات الذروة (24 ساعة)
+    const hrs = Array.from({ length: 24 }, (_, h) => ({ h, n: Number((st.hours || {})[h] || 0) }));
+    const maxHr = Math.max(1, ...hrs.map((r) => r.n));
+    const hoursRows = hrs.map((r) => `<tr><td>${r.h}:00</td><td>${r.n}</td>
+      <td style="width:45%"><div class="bar"><span style="width:${(r.n / maxHr) * 100}%"></span></div></td></tr>`).join("");
+
+    // الكلمات اللي ما اتطابقتش
+    let um = [];
+    try { um = (await api("unmatched")).words; lastUnmatched = um; } catch {}
+    const umRows = um.length
+      ? um.map((w) => `<tr><td>${esc(w.word)}</td><td>${w.count}</td></tr>`).join("")
+      : '<tr><td colspan="2" class="muted">لسه مفيش كلمات</td></tr>';
+
     const maxD = Math.max(1, ...st.daily.map((d) => d.presses));
     const chart = st.daily.map((d) => `
       <div class="col">
@@ -1221,9 +1244,17 @@ async function loadStats() {
         <div class="chips">${unusedHtml}</div>
         <p class="muted" style="margin:10px 0 0">لو زرار مش بيتداس خالص، ممكن تراجع محتواه أو تشيله.</p></div>
 
+      <div class="card"><div class="row"><h2 style="margin:0">🕒 أوقات الذروة (ساعات اليوم)</h2><button class="ghost" onclick="exportHours()">📥 تصدير</button></div>
+        <table><tr><th>الساعة</th><th>الضغطات</th><th></th></tr>${hoursRows}</table>
+        <p class="muted" style="margin:10px 0 0">الساعات بتوقيت القاهرة، والعدد من آخر تصفير.</p></div>
+
+      <div class="card"><div class="row"><h2 style="margin:0">🔤 أكتر الكلمات اللي ما اتطابقتش</h2><button class="ghost" onclick="exportUnmatched()">📥 تصدير</button></div>
+        <table><tr><th>الكلمة</th><th>عدد مرات الكتابة</th></tr>${umRows}</table>
+        <p class="muted" style="margin:10px 0 0">لو كلمة متكررة وملهاش رد، ضيفها في 🔑 كلمات الاستدعاء للزرار المناسب.</p></div>
+
       <div class="card"><div class="row"><h2 style="margin:0">مصدر العملاء</h2><button class="ghost" onclick="exportSources()">📥 تصدير</button></div>
         <table><tr><th>المصدر</th><th>العدد</th><th></th></tr>${barRows(st.bySource)}</table>
-        <p class="muted" style="margin:10px 0 0">wa = واتساب، ivr = الخط الساخن، qr = QR Code.</p></div>`;
+        <p class="muted" style="margin:10px 0 0">book = من بوت الحجز، وبدون مصدر = من البحث أو بوت تاني.</p></div>`;
   } catch (e) {
     box.innerHTML = `<div class="card" style="color:var(--bad)">${esc(e.message)}</div>`;
   }
