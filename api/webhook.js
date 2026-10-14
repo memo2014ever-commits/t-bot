@@ -1,7 +1,7 @@
 // بوت تلجرام: قايمة + رجوع + روابط + زرار سؤال + بحث بالكلمات + تحويل الطبي للخط الساخن
 import { Bot, InlineKeyboard, webhookCallback } from "grammy";
 import {
-  trackVisitor, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT,
+  trackVisitor, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched,
 } from "./stats.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
@@ -167,7 +167,7 @@ const HTML_OPTS = (markup) => ({
 bot.command("start", async (ctx) => {
   const { text, markup } = render(await getContent(), "");
   await ctx.reply(toHtml(text), HTML_OPTS(markup));
-  try { await trackVisitor(ctx.chat.id, ctx.match || "direct"); } catch {}
+  try { await trackVisitor(ctx.chat.id, ctx.match || ""); } catch {}
 });
 
 async function showNode(ctx, path, track) {
@@ -277,7 +277,11 @@ bot.on("message:text", async (ctx) => {
     return ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
   }
 
-  // 4) مفيش تطابق: رد عام مع القايمة
+  // 4) مفيش تطابق: نسجل الكلمات اللي ما اتطابقتش (بدون أرقام)، ورد عام مع القايمة
+  try {
+    const words = distinctTokens(text).filter((w) => !/\d/.test(w));
+    if (words.length) await trackUnmatched(words);
+  } catch {}
   return ctx.reply(toHtml(m.fallback || DEFAULT_FALLBACK), HTML_OPTS(root));
 });
 

@@ -20,18 +20,41 @@ export async function redis(cmd) {
 }
 
 // عميل جديد (/start)
+// كل عميل بيتسجل مرة واحدة في مصدره: book (من بوت الحجز) أو none (من البحث أو بوت تاني)
 export async function trackVisitor(chatId, source) {
-  await redis(["PFADD", "subs:all", String(chatId)]);
-  await redis(["PFADD", `subs:day:${todayKey()}`, String(chatId)]);
-  if (source && source !== "direct") await redis(["HINCRBY", "stats:src", source, 1]);
+  const id = String(chatId);
+  await redis(["PFADD", "subs:all", id]);
+  await redis(["PFADD", `subs:day:${todayKey()}`, id]);
+  const name = source === "book" ? "book" : "none";
+  await redis(["PFADD", `src:${name}`, id]);
 }
 
 // ضغطة: عداد + سجل بالوقت (السجل بيتقص كل شوية عشان يوفر أوامر)
+// الساعة الحالية بتوقيت القاهرة (0 - 23)
+function hourNow() {
+  const h = new Intl.DateTimeFormat("en-US", { timeZone: "Africa/Cairo", hour: "numeric", hourCycle: "h23" }).format(new Date());
+  return String(Number(h));
+}
+
 export async function trackPress(path, label) {
+  await redis(["HINCRBY", "stats:hours", hourNow(), 1]);
   await redis(["HINCRBY", `stats:press:${todayKey()}`, `${path}|${label || ""}`, 1]);
   const item = JSON.stringify({ t: Date.now(), p: path, l: label || "" });
   await redis(["LPUSH", "presslog", item]);
   if (Math.random() < 0.05) await redis(["LTRIM", "presslog", 0, 299]);
+}
+
+// كلمات العميل اللي ما اتطابقتش مع أي حاجة (بتتسجل كلمة كلمة، من غير أي رقم أو اسم)
+export async function trackUnmatched(words) {
+  for (const w of words.slice(0, 3)) {
+    await redis(["HINCRBY", "unmatched", w, 1]);
+  }
+}
+
+export async function getUnmatched() {
+  const arr = (await redis(["HGETALL", "unmatched"])) || [];
+  const o = toObj(arr);
+  return Object.entries(o).map(([word, count]) => ({ word, count })).sort((a, b) => b.count - a.count).slice(0, 50);
 }
 
 // سؤال من عميل: نص بس، من غير أي بيانات شخصية
@@ -93,10 +116,16 @@ export async function getStats() {
       return { date: d, newSubs: subs ?? 0, presses: sum(byPath), byPath };
     })
   );
-  const [subsAll, bySource] = await Promise.all([
+  const hoursArr = (await redis(["HGETALL", "stats:hours"])) || [];
+  const [subsAll, srcBook, srcNone] = await Promise.all([
     redis(["PFCOUNT", "subs:all"]),
-    redis(["HGETALL", "stats:src"]),
+    redis(["PFCOUNT", "src:book"]),
+    redis(["PFCOUNT", "src:none"]),
   ]);
+  const bySource = {
+    "من بوت الحجز": srcBook ?? 0,
+    "بدون مصدر (بحث أو بوت تاني)": srcNone ?? 0,
+  };
   const agg = {};
   perDay.forEach((d) => Object.entries(d.byPath).forEach(([k, v]) => (agg[k] = (agg[k] || 0) + v)));
   const today = perDay[6];
@@ -109,14 +138,15 @@ export async function getStats() {
     pressesYesterday: yesterday.presses,
     pressByPath: today.byPath,
     pressByPath7d: agg,
-    bySource: toObj(bySource),
+    bySource,
+    hours: toObj(hoursArr),
     daily: perDay.map(({ date, newSubs, presses }) => ({ date, newSubs, presses })),
   };
 }
 
 // تصفير: الإحصائيات + الضغطات (الأسئلة مش بتتصفر)
 export async function resetStats() {
-  const keys = ["subs:all", "stats:src", "presslog"];
+  const keys = ["subs:all", "stats:src", "src:book", "src:none", "presslog", "stats:hours", "unmatched"];
   for (let off = 0; off < 90; off++) {
     const d = dayKey(-off);
     keys.push(`subs:day:${d}`, `stats:press:${d}`);
