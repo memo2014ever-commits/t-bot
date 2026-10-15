@@ -1198,6 +1198,28 @@ function usageRows(obj) {
   if (!entries.length) return '<tr><td colspan="3" class="muted">لا يوجد نشاط في هذا النطاق</td></tr>';
   return entries.sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td>${esc(k.split("|")[1] || k)}</td><td>${v}</td><td style="width:35%"><div class="bar"><span style="width:${(v / max) * 100}%"></span></div></td></tr>`).join("");
 }
+async function deleteUnmatchedWord(word) {
+  if (!confirm(`تمسح الكلمة "${word}"؟`)) return;
+  try { await api("delunmatched", { ref: word }); toast("اتمسحت الكلمة", "ok"); loadStats(); }
+  catch (e) { toast(e.message, "bad"); }
+}
+async function deleteSelectedUnmatched() {
+  const words = [...document.querySelectorAll(".unmatched-check:checked")].map((x) => x.value);
+  if (!words.length) return toast("حدد كلمة واحدة على الأقل", "bad");
+  if (!confirm(`تمسح ${words.length} كلمة؟`)) return;
+  try {
+    await Promise.all(words.map((word) => api("delunmatched", { ref: word })));
+    toast("اتمسحت الكلمات المحددة", "ok"); loadStats();
+  } catch (e) { toast(e.message, "bad"); }
+}
+async function clearAllUnmatched() {
+  if (!confirm("تمسح كل الكلمات غير المتطابقة؟")) return;
+  try { await api("clearunmatched"); toast("اتمسحت كل الكلمات", "ok"); loadStats(); }
+  catch (e) { toast(e.message, "bad"); }
+}
+function toggleAllUnmatched(el) {
+  document.querySelectorAll(".unmatched-check").forEach((x) => { x.checked = el.checked; });
+}
 async function loadDailyForDate(date) {
   try {
     const chart = date ? dailyChart([{ date, presses: (await api("statsDay", { ref: date })).presses }]) : dailyChart(lastStats?.daily || []);
@@ -1252,8 +1274,8 @@ async function loadStats() {
     let um = [];
     try { um = (await api("unmatched")).words; lastUnmatched = um; } catch {}
     const umRows = um.length
-      ? um.map((w) => `<tr><td>${esc(w.word)}</td><td>${w.count}</td></tr>`).join("")
-      : '<tr><td colspan="2" class="muted">لسه مفيش كلمات</td></tr>';
+      ? um.map((w) => `<tr><td><input class="unmatched-check" type="checkbox" value="${esc(w.word)}"> ${esc(w.word)}</td><td>${w.count}</td><td><button class="danger" onclick='deleteUnmatchedWord(${JSON.stringify(w.word)})'>🗑 حذف</button></td></tr>`).join("")
+      : '<tr><td colspan="3" class="muted">لسه مفيش كلمات</td></tr>';
 
     const maxD = Math.max(1, ...st.daily.map((d) => d.presses));
     const chart = st.daily.map((d) => `
@@ -1310,8 +1332,8 @@ async function loadStats() {
         <table id="hoursTable"><tr><th>الساعة</th><th>الضغطات</th><th></th></tr>${hoursRows}</table>
         <p class="muted" style="margin:10px 0 0">الساعات بتوقيت القاهرة، والبيانات محفوظة تاريخيًا حتى التصفير اليدوي.</p></div>
 
-      <div class="card"><div class="row"><h2 style="margin:0">🔤 أكتر الكلمات اللي ما اتطابقتش</h2><button class="ghost" onclick="exportUnmatched()">📥 تصدير</button></div>
-        <table><tr><th>الكلمة</th><th>عدد مرات الكتابة</th></tr>${umRows}</table>
+      <div class="card"><div class="row"><h2 style="margin:0">🔤 أكتر الكلمات اللي ما اتطابقتش</h2><div class="row" style="gap:6px"><button class="ghost" onclick="exportUnmatched()">📥 تصدير</button><button class="danger" onclick="deleteSelectedUnmatched()">🗑 حذف المحدد</button><button class="danger" onclick="clearAllUnmatched()">🧹 حذف الكل</button></div></div>
+        <table><tr><th><input type="checkbox" onchange="toggleAllUnmatched(this)" aria-label="تحديد الكل"> الكلمة</th><th>عدد مرات الكتابة</th><th>إجراء</th></tr>${umRows}</table>
         <p class="muted" style="margin:10px 0 0">لو كلمة متكررة وملهاش رد، ضيفها في 🔑 كلمات الاستدعاء للزرار المناسب.</p></div>
 
       <div class="card"><div class="row"><h2 style="margin:0">مصادر المستخدمين</h2><button class="ghost" onclick="exportSources()">📥 تصدير</button></div>
