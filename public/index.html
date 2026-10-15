@@ -1188,6 +1188,34 @@ function hoursTable(hours) {
   const maxHr = Math.max(1, ...hrs.map((r) => r.n));
   return hrs.map((r) => `<tr><td>${r.h}:00</td><td>${r.n}</td><td style="width:45%"><div class="bar"><span style="width:${(r.n / maxHr) * 100}%"></span></div></td></tr>`).join("");
 }
+function dailyChart(days) {
+  const maxD = Math.max(1, ...days.map((d) => d.presses));
+  return days.map((d) => `<div class="col"><div class="num">${d.presses}</div><div class="bar-v" style="height:${Math.max(3, (d.presses / maxD) * 100)}%"></div><div class="lbl">${d.date.slice(5)}</div></div>`).join("");
+}
+function usageRows(obj) {
+  const entries = Object.entries(obj || {}).filter(([k]) => k.includes("|"));
+  const max = Math.max(1, ...entries.map(([, v]) => Number(v)));
+  if (!entries.length) return '<tr><td colspan="3" class="muted">لا يوجد نشاط في هذا النطاق</td></tr>';
+  return entries.sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td>${esc(k.split("|")[1] || k)}</td><td>${v}</td><td style="width:35%"><div class="bar"><span style="width:${(v / max) * 100}%"></span></div></td></tr>`).join("");
+}
+async function loadDailyForDate(date) {
+  try {
+    const chart = date ? dailyChart([{ date, presses: (await api("statsDay", { ref: date })).presses }]) : dailyChart(lastStats?.daily || []);
+    $("dailyChart").innerHTML = chart;
+    $("dailyMode").textContent = date ? `بيانات يوم ${date} فقط` : "الضغطات خلال آخر 7 أيام";
+  } catch (e) { toast(e.message, "bad"); }
+}
+async function loadButtonsForDate(date) {
+  try {
+    const obj = date ? (await api("statsDay", { ref: date })).byPath : lastStats?.pressByPath7d || {};
+    const used = Object.fromEntries(Object.entries(obj).filter(([k]) => {
+      const [p, l] = k.split("|"); const node = getNodeByPath(p);
+      return !!l && !!node && node.label === l;
+    }));
+    $("buttonsTable").innerHTML = `<tr><th>الزرار</th><th>الضغطات</th><th></th></tr>${usageRows(used)}`;
+    $("buttonsMode").textContent = date ? `بيانات يوم ${date} فقط` : "أكتر الزراير استخدامًا خلال آخر 7 أيام";
+  } catch (e) { toast(e.message, "bad"); }
+}
 async function loadHoursForDate(date) {
   try {
     const view = date ? await api("statsDay", { ref: date }) : { hours: lastStats?.hours || {} };
@@ -1267,11 +1295,11 @@ async function loadStats() {
         <div class="kpi"><div class="n" style="font-size:21px">${peak7}</div><div class="l">🕒 وقت الذروة (آخر 7 أيام)</div></div>
       </div>
 
-      <div class="card"><div class="row"><h2 style="margin:0">الضغطات آخر 7 أيام</h2><button class="ghost" onclick="exportDaily()">📥 تصدير</button></div>
-        <div class="chart">${chart}</div></div>
+      <div class="card"><div class="row"><h2 style="margin:0">الضغطات آخر 7 أيام</h2><div class="row" style="gap:6px"><label class="muted">يوم محدد: <input id="dailyDate" type="date" onchange="loadDailyForDate(this.value)" style="width:auto"></label><button class="ghost" onclick="loadDailyForDate(\"\")">آخر 7 أيام</button><button class="ghost" onclick="exportDaily()">📥 تصدير</button></div></div>
+        <p id="dailyMode" class="muted">الضغطات خلال آخر 7 أيام</p><div id="dailyChart" class="chart">${chart}</div></div>
 
-      <div class="card"><div class="row"><h2 style="margin:0">أكتر الزراير استخداماً (7 أيام)</h2><button class="ghost" onclick="exportButtons()">📥 تصدير</button></div>
-        <table><tr><th>الزرار</th><th>الضغطات</th><th></th></tr>${barRows(used, (k) => k.split("|")[1] || k)}</table></div>
+      <div class="card"><div class="row"><h2 style="margin:0">أكتر الزراير استخداماً (7 أيام)</h2><div class="row" style="gap:6px"><label class="muted">يوم محدد: <input id="buttonsDate" type="date" onchange="loadButtonsForDate(this.value)" style="width:auto"></label><button class="ghost" onclick="loadButtonsForDate(\"\")">آخر 7 أيام</button><button class="ghost" onclick="exportButtons()">📥 تصدير</button></div></div>
+        <p id="buttonsMode" class="muted">أكتر الزراير استخدامًا خلال آخر 7 أيام</p><table id="buttonsTable"><tr><th>الزرار</th><th>الضغطات</th><th></th></tr>${usageRows(used)}</table></div>
 
       <div class="card"><div class="row"><h2 style="margin:0">زراير ما اتداستش (7 أيام)</h2><button class="ghost" onclick="exportUnused()">📥 تصدير</button></div>
         <div class="chips">${unusedHtml}</div>
