@@ -21,10 +21,13 @@ export async function redis(cmd) {
 
 // عميل جديد (/start)
 // كل عميل بيتسجل مرة واحدة في مصدره: book (من بوت الحجز) أو none (من البحث أو بوت تاني)
+// لو العميل جديد فعلاً (أول مرة يدخل)، بيتسجل كمان في "جداد اليوم"
 export async function trackVisitor(chatId, source) {
   const id = String(chatId);
-  await redis(["PFADD", "subs:all", id]);
-  await redis(["PFADD", `subs:day:${todayKey()}`, id]);
+  const day = todayKey();
+  const added = await redis(["PFADD", "subs:all", id]);
+  await redis(["PFADD", `subs:day:${day}`, id]);
+  if (added === 1) await redis(["PFADD", `subs:new:${day}`, id]);
   const name = source === "book" ? "book" : "none";
   await redis(["PFADD", `src:${name}`, id]);
 }
@@ -37,7 +40,7 @@ function hourNow() {
 }
 
 export async function trackPress(path, label) {
-  await redis(["HINCRBY", "stats:hours", hourNow(), 1]);
+  await redis(["HINCRBY", `stats:hours:${todayKey()}`, hourNow(), 1]);
   await redis(["HINCRBY", `stats:press:${todayKey()}`, `${path}|${label || ""}`, 1]);
   const item = JSON.stringify({ t: Date.now(), p: path, l: label || "" });
   await redis(["LPUSH", "presslog", item]);
@@ -103,20 +106,49 @@ export async function getPressLog() {
   return raw.map((r) => JSON.parse(r));
 }
 
-// الأرقام للوحة التحكم: آخر 7 أيام + المقارنة بامبارح
-export async function getStats() {
+const isDay = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || "");
+
+// الأرقام للوحة التحكم
+// - لو day (مثلاً 2026-10-12): أرقام اليوم ده بس
+// - لو مفيش day: آخر 7 أيام + جداد اليوم + وقت الذروة
+export async function getStats(day) {
+  const configured = !!(URL_R && TOKEN_R);
+
+  if (isDay(day)) {
+    const [subsDay, subsNew, press, hours] = await Promise.all([
+      redis(["PFCOUNT", `subs:day:${day}`]),
+      redis(["PFCOUNT", `subs:new:${day}`]),
+      redis(["HGETALL", `stats:press:${day}`]),
+      redis(["HGETALL", `stats:hours:${day}`]),
+    ]);
+    const byPath = toObj(press);
+    return {
+      configured,
+      dayMode: true,
+      date: day,
+      subscribersToday: subsDay ?? 0,
+      newSubs: subsNew ?? 0,
+      presses: sum(byPath),
+      pressByPath: byPath,
+      hours: toObj(hours),
+    };
+  }
+
+  const offsets = [6, 5, 4, 3, 2, 1, 0];
   const perDay = await Promise.all(
-    [6, 5, 4, 3, 2, 1, 0].map(async (off) => {
+    offsets.map(async (off) => {
       const d = dayKey(-off);
-      const [subs, press] = await Promise.all([
+      const [subs, subsNew, press, hours] = await Promise.all([
         redis(["PFCOUNT", `subs:day:${d}`]),
+        redis(["PFCOUNT", `subs:new:${d}`]),
         redis(["HGETALL", `stats:press:${d}`]),
+        redis(["HGETALL", `stats:hours:${d}`]),
       ]);
       const byPath = toObj(press);
-      return { date: d, newSubs: subs ?? 0, presses: sum(byPath), byPath };
+      return { date: d, active: subs ?? 0, newSubs: subsNew ?? 0, presses: sum(byPath), byPath, hours: toObj(hours) };
     })
   );
-  const hoursArr = (await redis(["HGETALL", "stats:hours"])) || [];
+
   const [subsAll, srcBook, srcNone] = await Promise.all([
     redis(["PFCOUNT", "subs:all"]),
     redis(["PFCOUNT", "src:book"]),
@@ -126,32 +158,50 @@ export async function getStats() {
     "من بوت الحجز": srcBook ?? 0,
     "بدون مصدر (بحث أو بوت تاني)": srcNone ?? 0,
   };
+
   const agg = {};
-  perDay.forEach((d) => Object.entries(d.byPath).forEach(([k, v]) => (agg[k] = (agg[k] || 0) + v)));
+  const hours7d = {};
+  perDay.forEach((d) => {
+    Object.entries(d.byPath).forEach(([k, v]) => (agg[k] = (agg[k] || 0) + v));
+    Object.entries(d.hours).forEach(([h, v]) => (hours7d[h] = (hours7d[h] || 0) + v));
+  });
+
+  // أكتر ساعة ذروة في آخر 7 أيام
+  let peak = null;
+  Object.entries(hours7d).forEach(([h, v]) => {
+    if (!peak || v > peak.count) peak = { hour: Number(h), count: v };
+  });
+
   const today = perDay[6];
   const yesterday = perDay[5];
   return {
-    configured: !!(URL_R && TOKEN_R),
+    configured,
+    dayMode: false,
     subscribersTotal: subsAll ?? 0,
-    subscribersToday: today.newSubs,
+    subscribersToday: today.active,
+    newToday: today.newSubs,
     pressesToday: today.presses,
     pressesYesterday: yesterday.presses,
     pressByPath: today.byPath,
     pressByPath7d: agg,
     bySource,
-    hours: toObj(hoursArr),
+    hours: hours7d,
+    peak,
     daily: perDay.map(({ date, newSubs, presses }) => ({ date, newSubs, presses })),
   };
 }
 
-// تصفير: الإحصائيات + الضغطات (الأسئلة مش بتتصفر)
+// تصفير: كل الإحصائيات والضغطات والساعات (الأسئلة مش بتتصفر)
 export async function resetStats() {
-  const keys = ["subs:all", "stats:src", "src:book", "src:none", "presslog", "stats:hours", "unmatched"];
-  for (let off = 0; off < 90; off++) {
-    const d = dayKey(-off);
-    keys.push(`subs:day:${d}`, `stats:press:${d}`);
+  const keys = ["subs:all", "stats:src", "src:book", "src:none", "presslog", "unmatched"];
+  for (const pattern of ["subs:day:*", "subs:new:*", "stats:press:*", "stats:hours:*", "stats:hours"]) {
+    const found = (await redis(["KEYS", pattern])) || [];
+    keys.push(...found);
   }
-  await redis(["DEL", ...keys]);
+  const unique = [...new Set(keys)];
+  for (let i = 0; i < unique.length; i += 100) {
+    await redis(["DEL", ...unique.slice(i, i + 100)]);
+  }
 }
 
 function sum(o) { return Object.values(o).reduce((a, b) => a + b, 0); }

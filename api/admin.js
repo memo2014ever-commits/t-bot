@@ -72,7 +72,7 @@ export default async function handler(req, res) {
     }
 
     if (action === "stats") {
-      return res.json(await getStats());
+      return res.json(await getStats(req.body?.day));
     }
 
     if (action === "questions") {
