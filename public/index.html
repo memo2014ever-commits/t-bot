@@ -118,6 +118,37 @@
   .modal .row { justify-content:flex-start; }
 
   @media (max-width:600px) { .tab { padding:8px 10px; font-size:14px; } header h1 { font-size:16px; } .toolbar input { max-width:100%; } }
+
+  /* طبقة تحسين الواجهة: تحافظ على المكونات الحالية وتعيد تنظيمها فقط */
+  #app { display:grid; grid-template-columns:220px minmax(0,1fr); gap:16px; align-items:start; }
+  #app > .tabs { grid-column:1; grid-row:1 / span 6; position:sticky; top:14px; flex-direction:column; align-items:stretch; margin:0; padding:8px; }
+  #app > [id^="tab-"] { grid-column:2; min-width:0; }
+  #app > .tabs .tab { text-align:right; border-radius:9px; }
+  #app > .tabs .tab::first-letter { font-size:16px; }
+  .tab.active { box-shadow:inset -3px 0 var(--brand); }
+  header { position:sticky; top:0; z-index:20; box-shadow:0 4px 18px rgba(16,24,40,.12); }
+  header .sub { letter-spacing:.1px; }
+  .kpi { position:relative; overflow:hidden; transition:transform .18s, box-shadow .18s; }
+  .kpi:hover { transform:translateY(-2px); box-shadow:0 8px 22px rgba(16,24,40,.12); }
+  .kpi::before { content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--brand); }
+  .kpi:nth-child(2)::before { background:var(--ok); }
+  .kpi:nth-child(3)::before { background:#7a5af8; }
+  .kpi:nth-child(4)::before { background:var(--warn); }
+  .kpi .n { letter-spacing:-.5px; }
+  table tbody tr:hover, table tr:not(:first-child):hover { background:var(--hover); }
+  .toolbar, .card > .row { gap:10px; }
+  .toolbar label { display:flex; align-items:center; gap:6px; }
+  input[type="date"] { min-height:38px; }
+  .refresh-info { font-size:12px; color:rgba(255,255,255,.82); }
+  .live-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#9ff0c5; margin-left:5px; box-shadow:0 0 0 3px rgba(159,240,197,.18); }
+  .skeleton { min-height:90px; border-radius:12px; background:linear-gradient(90deg,var(--hover),var(--soft),var(--hover)); background-size:200% 100%; animation:shimmer 1.3s infinite; }
+  @keyframes shimmer { to { background-position:-200% 0; } }
+  @media (max-width:800px) {
+    #app { display:block; }
+    #app > .tabs { position:sticky; top:72px; z-index:15; flex-direction:row; overflow-x:auto; margin-bottom:14px; }
+    #app > .tabs .tab { text-align:center; flex:0 0 auto; }
+    .tab.active { box-shadow:inset 0 -3px var(--brand); }
+  }
 </style>
 </head>
 <body>
@@ -128,6 +159,7 @@
     <div class="sub">القوايم والمحتوى والإحصائيات</div>
   </div>
   <div class="row" style="justify-content:flex-end">
+    <span id="liveStatus" class="refresh-info"><span class="live-dot"></span>تحديث تلقائي</span>
     <span id="who" class="sub hidden"></span>
     <button class="ghost" id="themeBtn" onclick="toggleTheme()">🌙</button>
     <button class="ghost hidden" id="logoutBtn" onclick="logout()">خروج</button>
@@ -265,6 +297,7 @@
 <script>
 const DRAFT_KEY = "legan-draft";
 let creds = null, data = null, role = "admin", dirty = false, draftTimer = null, query = "";
+let activeTab = "stats", refreshTimer = null, lastRefreshAt = 0;
 
 const $ = (id) => document.getElementById(id);
 
@@ -315,6 +348,20 @@ function setStatus(text, cls = "") {
   el.className = "status " + cls;
 }
 
+function markRefreshed() {
+  lastRefreshAt = Date.now();
+  const el = $("liveStatus");
+  if (el) el.innerHTML = `<span class="live-dot"></span>آخر تحديث: ${new Date(lastRefreshAt).toLocaleTimeString("ar-EG", { timeZone: "Africa/Cairo", hour: "2-digit", minute: "2-digit" })}`;
+}
+function startAutoRefresh() {
+  clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => {
+    if (!creds || document.hidden) return;
+    if (activeTab === "stats") loadStats();
+    else if (activeTab === "presslog") loadPressLog();
+  }, 60000);
+}
+
 // ---------- الوضع الداكن ----------
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
@@ -341,6 +388,7 @@ async function login() {
     checkDraft();
     draw();
     loadStats();
+    startAutoRefresh();
   } catch (e) {
     creds = null;
     $("loginMsg").textContent = e.message;
@@ -385,6 +433,7 @@ function dropDraft() {
 
 // ---------- التنقل ----------
 function showTab(name) {
+  activeTab = name;
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   ["stats", "menu", "questions", "presslog", "history", "help"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
   if (name === "stats") loadStats();
@@ -1160,6 +1209,7 @@ let pressCache = [];
 async function loadPressLog() {
   try {
     pressCache = (await api("presslog")).log;
+    markRefreshed();
     renderPressLog();
   } catch (e) { toast(e.message, "bad"); }
 }
@@ -1253,6 +1303,7 @@ async function loadStats() {
   try {
     const st = await api("stats");
     lastStats = st;
+    markRefreshed();
     if (!st.configured) {
       box.innerHTML = '<div class="card" style="border-color:#fedf89">⚠️ الإحصائيات مش متوصلة. اربط Upstash في Vercel وعمل Redeploy.</div>';
       return;
