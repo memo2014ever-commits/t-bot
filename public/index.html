@@ -1165,112 +1165,37 @@ function exportPressLog() {
     ...pressCache.map((x) => [fmtTime(x.t), x.l, x.p])]);
 }
 
-// ---------- الإحصائيات (مع تقويم لكل قسم) ----------
-let defaultStats = null;
-const dayPick = { kpi: "", buttons: "", hours: "" };   // "" = الافتراضي (اليوم / آخر 7 أيام)
-const dayCache = {};
-
-async function fetchStatsDay(day) {
-  const k = day || "";
-  if (!dayCache[k]) dayCache[k] = await api("stats", day ? { day } : {});
-  return dayCache[k];
-}
-
-// الزراير الموجودة فعلاً في الشجرة (المحذوف ما يظهرش)
-function filterCurrent(obj) {
-  return Object.fromEntries(Object.entries(obj || {}).filter(([k]) => {
-    const [p, l] = k.split("|");
-    if (!l) return false;
-    const node = getNodeByPath(p);
-    return !!node && node.label === l;
-  }));
-}
-
-function sectionHead(title, key, extraBtn = "") {
-  const val = dayPick[key];
-  return `<div class="row" style="margin-bottom:8px;flex-wrap:wrap">
-    <h2 style="margin:0">${title}</h2>
-    <div class="row" style="gap:6px;flex-wrap:wrap">
-      ${extraBtn}
-      <input type="date" max="${today()}" value="${val}" onchange="setDayPick('${key}', this.value)"
-        style="width:auto;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text)">
-      ${val ? `<button class="ghost" onclick="setDayPick('${key}', '')">↺ الافتراضي</button>` : ""}
-    </div></div>`;
-}
-
-async function setDayPick(key, v) {
-  dayPick[key] = v || "";
-  await renderStats();
-}
-
 async function loadStats() {
   const box = $("stats-body");
   box.innerHTML = '<div class="muted">جاري التحميل...</div>';
-  Object.keys(dayCache).forEach((k) => delete dayCache[k]);
   try {
-    defaultStats = await fetchStatsDay("");
-    lastStats = defaultStats;
-    if (!defaultStats.configured) {
+    const st = await api("stats");
+    lastStats = st;
+    if (!st.configured) {
       box.innerHTML = '<div class="card" style="border-color:#fedf89">⚠️ الإحصائيات مش متوصلة. اربط Upstash في Vercel وعمل Redeploy.</div>';
       return;
     }
-    try { lastUnmatched = (await api("unmatched")).words; } catch {}
-    await renderStats();
-  } catch (e) {
-    box.innerHTML = `<div class="card" style="color:var(--bad)">${esc(e.message)}</div>`;
-  }
-}
 
-async function renderStats() {
-  const box = $("stats-body");
-  const st = defaultStats;
-  if (!st || !st.configured) return;
-  try {
-    const [kpiD, btnD, hrsD] = await Promise.all([
-      dayPick.kpi ? fetchStatsDay(dayPick.kpi) : null,
-      dayPick.buttons ? fetchStatsDay(dayPick.buttons) : null,
-      dayPick.hours ? fetchStatsDay(dayPick.hours) : null,
-    ]);
+    const delta = st.pressesYesterday
+      ? Math.round(((st.pressesToday - st.pressesYesterday) / st.pressesYesterday) * 100)
+      : null;
+    const deltaHtml = delta === null
+      ? '<div class="delta muted">مفيش بيانات امبارح للمقارنة</div>'
+      : `<div class="delta ${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "▲" : "▼"} ${Math.abs(delta)}% عن امبارح</div>`;
 
-    // ---- نظرة عامة ----
-    const newV = kpiD ? kpiD.newSubs : st.newToday;
-    const activeV = kpiD ? kpiD.subscribersToday : st.subscribersToday;
-    const pressV = kpiD ? kpiD.presses : st.pressesToday;
-    const dayTag = kpiD ? kpiD.date : "النهاردة";
-    const delta = !kpiD && st.pressesYesterday
-      ? Math.round(((st.pressesToday - st.pressesYesterday) / st.pressesYesterday) * 100) : null;
-    const deltaHtml = delta === null ? "" :
-      `<div class="delta ${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "▲" : "▼"} ${Math.abs(delta)}% عن امبارح</div>`;
-
-    // ---- وقت الذروة (آخر 7 أيام) ----
-    const peakHtml = st.peak
-      ? `<b>${st.peak.hour}:00</b> (${st.peak.hour}:00 - ${(st.peak.hour + 1) % 24}:00) بـ <b>${st.peak.count}</b> ضغطة`
-      : "لسه مفيش ضغطات";
-
-    // ---- أكتر الزراير ----
-    const btnObj = btnD ? filterCurrent(btnD.pressByPath) : filterCurrent(st.pressByPath7d);
-    const usedPaths = Object.keys(btnObj).map((k) => k.split("|")[0]);
-    const unused = allNodes().filter(({ path }) => path !== "" && !usedPaths.includes(path));
-    const barRows = (obj, mapFn) => {
-      const entries = Object.entries(obj).sort((a, b) => b[1] - a[1]);
-      const max = Math.max(1, ...entries.map((e) => e[1]));
-      if (!entries.length) return '<tr><td colspan="3" class="muted">لا يوجد نشاط</td></tr>';
-      return entries.map(([k, v]) => `
-        <tr><td>${esc(mapFn ? mapFn(k) : k)}</td><td>${v}</td>
-        <td style="width:35%"><div class="bar"><span style="width:${(v / max) * 100}%"></span></div></td></tr>`).join("");
-    };
-    const unusedHtml = unused.length
-      ? unused.map(({ node }) => `<span class="chip zero">${esc(node.label || "بدون اسم")}</span>`).join("")
-      : '<span class="muted">كل الزراير اتداست ✅</span>';
-
-    // ---- أوقات الذروة ----
-    const hrsObj = hrsD ? hrsD.hours : st.hours;
-    const hrs = Array.from({ length: 24 }, (_, h) => ({ h, n: Number(hrsObj[h] || 0) }));
+    // أوقات الذروة (24 ساعة)
+    const hrs = Array.from({ length: 24 }, (_, h) => ({ h, n: Number((st.hours || {})[h] || 0) }));
     const maxHr = Math.max(1, ...hrs.map((r) => r.n));
     const hoursRows = hrs.map((r) => `<tr><td>${r.h}:00</td><td>${r.n}</td>
       <td style="width:45%"><div class="bar"><span style="width:${(r.n / maxHr) * 100}%"></span></div></td></tr>`).join("");
 
-    // ---- الشارت (آخر 7 أيام) ----
+    // الكلمات اللي ما اتطابقتش
+    let um = [];
+    try { um = (await api("unmatched")).words; lastUnmatched = um; } catch {}
+    const umRows = um.length
+      ? um.map((w) => `<tr><td>${esc(w.word)}</td><td>${w.count}</td></tr>`).join("")
+      : '<tr><td colspan="2" class="muted">لسه مفيش كلمات</td></tr>';
+
     const maxD = Math.max(1, ...st.daily.map((d) => d.presses));
     const chart = st.daily.map((d) => `
       <div class="col">
@@ -1279,35 +1204,49 @@ async function renderStats() {
         <div class="lbl">${d.date.slice(5)}</div>
       </div>`).join("");
 
-    // ---- الكلمات ومصدر العملاء ----
-    const umRows = lastUnmatched.length
-      ? lastUnmatched.map((w) => `<tr><td>${esc(w.word)}</td><td>${w.count}</td></tr>`).join("")
-      : '<tr><td colspan="2" class="muted">لسه مفيش كلمات</td></tr>';
+    const barRows = (obj, mapFn) => {
+      const entries = Object.entries(obj).sort((a, b) => b[1] - a[1]);
+      const max = Math.max(1, ...entries.map((e) => e[1]));
+      if (!entries.length) return '<tr><td colspan="3" class="muted">لا يوجد نشاط بعد</td></tr>';
+      return entries.map(([k, v]) => `
+        <tr><td>${esc(mapFn ? mapFn(k) : k)}</td><td>${v}</td>
+        <td style="width:35%"><div class="bar"><span style="width:${(v / max) * 100}%"></span></div></td></tr>`).join("");
+    };
+
+    // الأزرار اللي ما اتداستش خالص في 7 أيام
+    // نعرض بس الزراير الموجودة فعلاً (المحذوف أو المتغير اسمه ما يظهرش)
+    const used = Object.fromEntries(Object.entries(st.pressByPath7d || {}).filter(([k]) => {
+      const [p, l] = k.split("|");
+      if (!l) return false;
+      const node = getNodeByPath(p);
+      return !!node && node.label === l;
+    }));
+    const usedPaths = Object.keys(used).map((k) => k.split("|")[0]);
+    const unused = allNodes().filter(({ path }) => path !== "" && !usedPaths.includes(path));
+    const unusedHtml = unused.length
+      ? unused.map(({ path, node }) => `<span class="chip zero">${esc(node.label || "بدون اسم")}</span>`).join("")
+      : '<span class="muted">كل الأزرار اتداست خلال آخر 7 أيام ✅</span>';
 
     box.innerHTML = `
-      <div class="card">${sectionHead("📊 نظرة عامة " + (kpiD ? "" : ""), "kpi")}
-        <div class="kpis">
-          <div class="kpi"><div class="n">${st.subscribersTotal}</div><div class="l">👥 إجمالي المشتركين (تقريبي)</div></div>
-          <div class="kpi"><div class="n">${newV}</div><div class="l">🆕 جداد (${dayTag})</div></div>
-          <div class="kpi"><div class="n">${activeV}</div><div class="l">🟢 نشطين (${dayTag})</div></div>
-          <div class="kpi"><div class="n">${pressV}</div><div class="l">👆 ضغطات (${dayTag})</div>${deltaHtml}</div>
-        </div>
-        <div class="muted">⏰ وقت الذروة (آخر 7 أيام): ${peakHtml}</div>
+      <div class="kpis">
+        <div class="kpi"><div class="n">${st.subscribersTotal}</div><div class="l">👥 إجمالي المشتركين (تقريبي)</div></div>
+        <div class="kpi"><div class="n">${st.subscribersToday}</div><div class="l">🆕 نشطين النهاردة</div></div>
+        <div class="kpi"><div class="n">${st.pressesToday}</div><div class="l">👆 ضغطات النهاردة</div>${deltaHtml}</div>
       </div>
 
       <div class="card"><div class="row"><h2 style="margin:0">الضغطات آخر 7 أيام</h2><button class="ghost" onclick="exportDaily()">📥 تصدير</button></div>
         <div class="chart">${chart}</div></div>
 
-      <div class="card">${sectionHead("🧭 الزراير " + (btnD ? "" : "(آخر 7 أيام)"), "buttons",
-        `<button class="ghost" onclick="exportButtons()">📥 تصدير</button>`)}
-        <table><tr><th>الزرار</th><th>الضغطات</th><th></th></tr>${barRows(btnObj, pathLabel)}</table>
-        <h3 style="margin:14px 0 6px">زراير ما اتداستش</h3>
-        <div class="chips">${unusedHtml}</div></div>
+      <div class="card"><div class="row"><h2 style="margin:0">أكتر الزراير استخداماً (7 أيام)</h2><button class="ghost" onclick="exportButtons()">📥 تصدير</button></div>
+        <table><tr><th>الزرار</th><th>الضغطات</th><th></th></tr>${barRows(used, (k) => k.split("|")[1] || k)}</table></div>
 
-      <div class="card">${sectionHead("🕒 أوقات الذروة", "hours",
-        `<button class="ghost" onclick="exportHours()">📥 تصدير</button>`)}
+      <div class="card"><div class="row"><h2 style="margin:0">زراير ما اتداستش (7 أيام)</h2><button class="ghost" onclick="exportUnused()">📥 تصدير</button></div>
+        <div class="chips">${unusedHtml}</div>
+        <p class="muted" style="margin:10px 0 0">لو زرار مش بيتداس خالص، ممكن تراجع محتواه أو تشيله.</p></div>
+
+      <div class="card"><div class="row"><h2 style="margin:0">🕒 أوقات الذروة (ساعات اليوم)</h2><button class="ghost" onclick="exportHours()">📥 تصدير</button></div>
         <table><tr><th>الساعة</th><th>الضغطات</th><th></th></tr>${hoursRows}</table>
-        <p class="muted" style="margin:8px 0 0">الساعات بتوقيت القاهرة.</p></div>
+        <p class="muted" style="margin:10px 0 0">الساعات بتوقيت القاهرة، والعدد من آخر تصفير.</p></div>
 
       <div class="card"><div class="row"><h2 style="margin:0">🔤 أكتر الكلمات اللي ما اتطابقتش</h2><button class="ghost" onclick="exportUnmatched()">📥 تصدير</button></div>
         <table><tr><th>الكلمة</th><th>عدد مرات الكتابة</th></tr>${umRows}</table>
@@ -1321,6 +1260,7 @@ async function renderStats() {
   }
 }
 
+// ---------- سجل النسخ ----------
 async function loadHistory() {
   const t = $("historyTable");
   t.innerHTML = '<tr><td class="muted">جاري التحميل...</td></tr>';
