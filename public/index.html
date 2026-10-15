@@ -221,12 +221,12 @@
         <h2 style="margin:0">سجل الضغطات</h2>
         <div class="row" style="gap:6px">
           <button class="ghost" onclick="loadPressLog()">🔄 تحديث</button>
-          <button class="ghost" onclick="exportPressLog()">📥 تصدير</button>
+          <button class="ghost" onclick="exportPressLog()">📥 تصدير Excel</button>
         </div>
       </div>
-      <div class="toolbar"><input id="pSearch" placeholder="🔍 ابحث باسم الزرار..." oninput="renderPressLog()"></div>
+      <div class="toolbar"><input id="pSearch" placeholder="🔍 ابحث باسم الزرار..." oninput="renderPressLog()"><label class="muted">اليوم: <input id="pDate" type="date" onchange="renderPressLog()" style="width:auto"></label><button class="ghost" onclick="clearPressDate()">كل الأيام</button></div>
       <div class="card" style="padding:0;overflow:auto"><table id="pTable"></table></div>
-      <p class="muted">آخر 300 ضغطة بالوقت. الوقت بتوقيت القاهرة.</p>
+      <p class="muted">السجل التاريخي الكامل المتاح، والوقت بتوقيت القاهرة. استخدم تقويم هذا القسم لتصفية يوم محدد.</p>
     </div>
 
     <!-- النسخ السابقة -->
@@ -961,14 +961,16 @@ async function resetAllStats() {
 
 let lastStats = null;
 let lastUnmatched = [];
+let lastHoursView = {};
+let lastHoursDate = "";
 
 function exportUnmatched() {
   csvDownload(`الكلمات_غير_المتطابقة_${today()}.csv`, [["الكلمة", "عدد مرات الكتابة"], ...lastUnmatched.map((w) => [w.word, w.count])]);
 }
 
 function exportHours() {
-  const hrs = (lastStats && lastStats.hours) || {};
-  csvDownload(`أوقات_الذروة_${today()}.csv`, [["الساعة", "الضغطات"], ...Array.from({ length: 24 }, (_, h) => [`${h}:00`, Number(hrs[h] || 0)])]);
+  const hrs = lastHoursView || {};
+  excelDownload(`أوقات_الذروة_${lastHoursDate || "الإجمالي"}.xls`, [["الساعة", "الضغطات"], ...Array.from({ length: 24 }, (_, h) => [`${h}:00`, Number(hrs[h] || 0)])]);
 }
 
 // نفس فلتر العرض: الزراير الموجودة بس
@@ -993,6 +995,17 @@ function csvDownload(fileName, rows) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   a.download = fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ملف Excel بصيغة HTML متوافقة مع Excel، بدون مكتبة خارجية أو فقدان النص العربي.
+function excelDownload(fileName, rows) {
+  const cell = (v) => `<td style="mso-number-format:'\@';">${esc(v)}</td>`;
+  const html = `<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"></head><body><table>${rows.map((r, i) => `<tr>${r.map(cell).join("")}</tr>`).join("")}</table></body></html>`;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\uFEFF", html], { type: "application/vnd.ms-excel;charset=utf-8" }));
+  a.download = fileName.endsWith(".xls") ? fileName : `${fileName}.xls`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
@@ -1151,18 +1164,37 @@ async function loadPressLog() {
   } catch (e) { toast(e.message, "bad"); }
 }
 
+function cairoDate(ms) { return new Date(ms).toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }); }
+function clearPressDate() { $("pDate").value = ""; renderPressLog(); }
 function renderPressLog() {
   const t = $("pTable");
   const q = ($("pSearch").value || "").trim();
-  const rows = pressCache.filter((x) => !q || (x.l || "").includes(q));
+  const date = $("pDate").value;
+  const rows = pressCache.filter((x) => (!q || (x.l || "").includes(q)) && (!date || cairoDate(x.t) === date));
   if (!rows.length) { t.innerHTML = '<tr><td class="muted">مفيش ضغطات بعد</td></tr>'; return; }
   t.innerHTML = `<tr><th>الوقت</th><th>الزرار</th><th>المكان</th></tr>` + rows.map((x) => `
     <tr><td>${fmtTime(x.t)}</td><td>${esc(x.l || "—")}</td><td class="muted">${esc(x.p === "" ? "الرئيسية" : x.p)}</td></tr>`).join("");
 }
 
 function exportPressLog() {
-  csvDownload(`سجل_الضغطات_${today()}.csv`, [["الوقت", "الزرار", "المكان"],
-    ...pressCache.map((x) => [fmtTime(x.t), x.l, x.p])]);
+  const date = $("pDate")?.value || "كل_التواريخ";
+  const q = ($("pSearch")?.value || "").trim();
+  const rows = pressCache.filter((x) => (!q || (x.l || "").includes(q)) && (!$("pDate")?.value || cairoDate(x.t) === $("pDate").value));
+  excelDownload(`سجل_الضغطات_${date}.xls`, [["الوقت", "الزرار", "المكان"], ...rows.map((x) => [fmtTime(x.t), x.l, x.p])]);
+}
+
+function hoursTable(hours) {
+  const hrs = Array.from({ length: 24 }, (_, h) => ({ h, n: Number(hours[h] || 0) }));
+  const maxHr = Math.max(1, ...hrs.map((r) => r.n));
+  return hrs.map((r) => `<tr><td>${r.h}:00</td><td>${r.n}</td><td style="width:45%"><div class="bar"><span style="width:${(r.n / maxHr) * 100}%"></span></div></td></tr>`).join("");
+}
+async function loadHoursForDate(date) {
+  try {
+    const view = date ? await api("statsDay", { ref: date }) : { hours: lastStats?.hours || {} };
+    lastHoursView = view.hours || {}; lastHoursDate = date || "";
+    $("hoursTable").innerHTML = `<tr><th>الساعة</th><th>الضغطات</th><th></th></tr>${hoursTable(lastHoursView)}`;
+    $("hoursMode").textContent = date ? `بيانات يوم ${date} فقط` : "الإجمالي التاريخي لكل البيانات المتاحة";
+  } catch (e) { toast(e.message, "bad"); }
 }
 
 async function loadStats() {
@@ -1183,11 +1215,10 @@ async function loadStats() {
       ? '<div class="delta muted">مفيش بيانات امبارح للمقارنة</div>'
       : `<div class="delta ${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "▲" : "▼"} ${Math.abs(delta)}% عن امبارح</div>`;
 
-    // أوقات الذروة (24 ساعة)
-    const hrs = Array.from({ length: 24 }, (_, h) => ({ h, n: Number((st.hours || {})[h] || 0) }));
-    const maxHr = Math.max(1, ...hrs.map((r) => r.n));
-    const hoursRows = hrs.map((r) => `<tr><td>${r.h}:00</td><td>${r.n}</td>
-      <td style="width:45%"><div class="bar"><span style="width:${(r.n / maxHr) * 100}%"></span></div></td></tr>`).join("");
+    // أوقات الذروة: إجمالي تاريخي افتراضي، أو يوم مستقل يختاره المستخدم
+    lastHoursView = st.hours || {}; lastHoursDate = "";
+    const hoursRows = hoursTable(lastHoursView);
+    const peak7 = st.peakLast7 ? `${String(st.peakLast7.hour).padStart(2, "0")}:00 (${st.peakLast7.count} ضغطة)` : "لا توجد بيانات كافية";
 
     // الكلمات اللي ما اتطابقتش
     let um = [];
@@ -1230,8 +1261,10 @@ async function loadStats() {
     box.innerHTML = `
       <div class="kpis">
         <div class="kpi"><div class="n">${st.subscribersTotal}</div><div class="l">👥 إجمالي المشتركين (تقريبي)</div></div>
-        <div class="kpi"><div class="n">${st.subscribersToday}</div><div class="l">🆕 نشطين النهاردة</div></div>
+        <div class="kpi"><div class="n">${st.newSubscribersToday ?? 0}</div><div class="l">🆕 مشتركون جدد اليوم</div></div>
+        <div class="kpi"><div class="n">${st.activeToday ?? 0}</div><div class="l">🟢 نشطون اليوم</div></div>
         <div class="kpi"><div class="n">${st.pressesToday}</div><div class="l">👆 ضغطات النهاردة</div>${deltaHtml}</div>
+        <div class="kpi"><div class="n" style="font-size:21px">${peak7}</div><div class="l">🕒 وقت الذروة (آخر 7 أيام)</div></div>
       </div>
 
       <div class="card"><div class="row"><h2 style="margin:0">الضغطات آخر 7 أيام</h2><button class="ghost" onclick="exportDaily()">📥 تصدير</button></div>
@@ -1244,17 +1277,18 @@ async function loadStats() {
         <div class="chips">${unusedHtml}</div>
         <p class="muted" style="margin:10px 0 0">لو زرار مش بيتداس خالص، ممكن تراجع محتواه أو تشيله.</p></div>
 
-      <div class="card"><div class="row"><h2 style="margin:0">🕒 أوقات الذروة (ساعات اليوم)</h2><button class="ghost" onclick="exportHours()">📥 تصدير</button></div>
-        <table><tr><th>الساعة</th><th>الضغطات</th><th></th></tr>${hoursRows}</table>
-        <p class="muted" style="margin:10px 0 0">الساعات بتوقيت القاهرة، والعدد من آخر تصفير.</p></div>
+      <div class="card" id="hoursCard"><div class="row"><h2 style="margin:0">🕒 أوقات الذروة</h2><div class="row" style="gap:6px"><label class="muted">يوم محدد: <input id="peakDate" type="date" onchange="loadHoursForDate(this.value)" style="width:auto"></label><button class="ghost" onclick="loadHoursForDate("")">الإجمالي</button><button class="ghost" onclick="exportHours()">📥 Excel</button></div></div>
+        <p id="hoursMode" class="muted">الإجمالي التاريخي لكل البيانات المتاحة</p>
+        <table id="hoursTable"><tr><th>الساعة</th><th>الضغطات</th><th></th></tr>${hoursRows}</table>
+        <p class="muted" style="margin:10px 0 0">الساعات بتوقيت القاهرة، والبيانات محفوظة تاريخيًا حتى التصفير اليدوي.</p></div>
 
       <div class="card"><div class="row"><h2 style="margin:0">🔤 أكتر الكلمات اللي ما اتطابقتش</h2><button class="ghost" onclick="exportUnmatched()">📥 تصدير</button></div>
         <table><tr><th>الكلمة</th><th>عدد مرات الكتابة</th></tr>${umRows}</table>
         <p class="muted" style="margin:10px 0 0">لو كلمة متكررة وملهاش رد، ضيفها في 🔑 كلمات الاستدعاء للزرار المناسب.</p></div>
 
-      <div class="card"><div class="row"><h2 style="margin:0">مصدر العملاء</h2><button class="ghost" onclick="exportSources()">📥 تصدير</button></div>
+      <div class="card"><div class="row"><h2 style="margin:0">مصادر المستخدمين</h2><button class="ghost" onclick="exportSources()">📥 تصدير</button></div>
         <table><tr><th>المصدر</th><th>العدد</th><th></th></tr>${barRows(st.bySource)}</table>
-        <p class="muted" style="margin:10px 0 0">book = من بوت الحجز، وبدون مصدر = من البحث أو بوت تاني.</p></div>`;
+        <p class="muted" style="margin:10px 0 0">من البوت الآخر = رابط يبدأ بـ ?start=book، ومن البحث = الدخول بالمنشن أو البحث المباشر.</p></div>`;
   } catch (e) {
     box.innerHTML = `<div class="card" style="color:var(--bad)">${esc(e.message)}</div>`;
   }
