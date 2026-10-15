@@ -61,6 +61,9 @@ export async function getUnmatched() {
   return Object.entries(o).map(([word, count]) => ({ word, count })).sort((a, b) => b.count - a.count).slice(0, 50);
 }
 
+export async function deleteUnmatched(word) { await redis(["HDEL", "unmatched", word]); }
+export async function clearUnmatched() { await redis(["DEL", "unmatched"]); }
+
 export async function pushQuestion(text) {
   await redis(["LPUSH", "questions", JSON.stringify({ t: Date.now(), q: String(text).slice(0, 500) })]);
   if (Math.random() < 0.05) await redis(["LTRIM", "questions", 0, 499]);

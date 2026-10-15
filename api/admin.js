@@ -1,7 +1,7 @@
 // خادم لوحة التحكم: تسجيل دخول بدورين (أدمن / محرر)، وقراءة وحفظ وسجل نسخ من GitHub
 // كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
 import { timingSafeEqual } from "crypto";
-import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, getPressLog, getUnmatched } from "./stats.js";
+import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched } from "./stats.js";
 
 const {
   ADMIN_USER, ADMIN_PASS,          // الأدمن: يعدّل ويحذف
@@ -94,6 +94,17 @@ export default async function handler(req, res) {
 
     if (action === "unmatched") {
       return res.json({ words: await getUnmatched() });
+    }
+
+    if (action === "delunmatched") {
+      if (typeof ref !== "string" || !ref.trim() || ref.length > 100) return res.status(400).json({ error: "كلمة غلط" });
+      await deleteUnmatched(ref);
+      return res.json({ ok: true });
+    }
+
+    if (action === "clearunmatched") {
+      await clearUnmatched();
+      return res.json({ ok: true });
     }
 
     if (action === "presslog") {
