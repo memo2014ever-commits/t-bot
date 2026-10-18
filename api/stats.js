@@ -44,11 +44,12 @@ export async function trackPress(path, label) {
   const d = todayKey();
   const h = hourNow();
   await Promise.all([
-    redis(["HINCRBY", "stats:hours", h, 1]),
     redis(["HINCRBY", `stats:hours:${d}`, h, 1]),
     redis(["HINCRBY", `stats:press:${d}`, `${path}|${label || ""}`, 1]),
     redis(["LPUSH", "presslog", JSON.stringify({ t: Date.now(), p: path, l: label || "" })]),
   ]);
+  // سجل الضغطات بيتقص تقريباً كل 20 ضغطة (يوفر أوامر، ويمنع الكبر بلا حد)
+  if (Math.random() < 0.05) await redis(["LTRIM", "presslog", 0, 499]);
 }
 
 export async function trackUnmatched(words) {
@@ -92,7 +93,7 @@ export async function deleteQuestion(raw) { await redis(["LREM", "questions", 1,
 
 // لا يوجد قص للسجل؛ يعرض كل السجل التاريخي المتاح.
 export async function getPressLog() {
-  const raw = (await redis(["LRANGE", "presslog", 0, -1])) || [];
+  const raw = (await redis(["LRANGE", "presslog", 0, 499])) || [];
   return raw.map((r) => JSON.parse(r));
 }
 
@@ -107,15 +108,15 @@ function peakHour(hours) {
 export async function getStats() {
   const perDay = await Promise.all([6, 5, 4, 3, 2, 1, 0].map(async (off) => {
     const date = dayKey(-off);
-    const [subs, press, hours] = await Promise.all([
+    const [active, newSubs, press, hours] = await Promise.all([
       redis(["PFCOUNT", `subs:day:${date}`]),
+      redis(["PFCOUNT", `subs:new:day:${date}`]),
       redis(["HGETALL", `stats:press:${date}`]),
       hoursForDate(date),
     ]);
     const byPath = toObj(press);
-    return { date, newSubs: subs ?? 0, presses: sum(byPath), byPath, hours };
+    return { date, active: active ?? 0, newSubs: newSubs ?? 0, presses: sum(byPath), byPath, hours };
   }));
-  const hours = toObj((await redis(["HGETALL", "stats:hours"])) || []);
   const [subsAll, newToday, activeToday, srcBook, srcNone] = await Promise.all([
     redis(["PFCOUNT", "subs:all"]), redis(["PFCOUNT", `subs:new:day:${todayKey()}`]),
     redis(["PFCOUNT", `active:day:${todayKey()}`]), redis(["PFCOUNT", "src:book"]), redis(["PFCOUNT", "src:none"]),
@@ -126,11 +127,11 @@ export async function getStats() {
   perDay.forEach((d) => Object.entries(d.hours).forEach(([h, n]) => (last7Hours[h] = (last7Hours[h] || 0) + n)));
   return {
     configured: !!(URL_R && TOKEN_R), subscribersTotal: subsAll ?? 0,
-    subscribersToday: perDay[6].newSubs, newSubscribersToday: newToday ?? 0, activeToday: activeToday ?? 0,
+    subscribersToday: perDay[6].active, newSubscribersToday: newToday ?? 0, activeToday: activeToday ?? 0,
     pressesToday: perDay[6].presses, pressesYesterday: perDay[5].presses,
     pressByPath: perDay[6].byPath, pressByPath7d: agg,
     bySource: { "من البوت الآخر": srcBook ?? 0, "من البحث": srcNone ?? 0 },
-    hours, last7Hours, peakLast7: peakHour(last7Hours), daily: perDay.map(({ date, newSubs, presses }) => ({ date, newSubs, presses })),
+    hours: last7Hours, last7Hours, peakLast7: peakHour(last7Hours), daily: perDay.map(({ date, newSubs, presses }) => ({ date, newSubs, presses })),
   };
 }
 
