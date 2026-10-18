@@ -151,6 +151,7 @@
       <button class="tab active" data-tab="stats" onclick="showTab('stats')">📊 الإحصائيات</button>
       <button class="tab" data-tab="menu" onclick="showTab('menu')">🧭 القوايم والأزرار</button>
       <button class="tab" data-tab="questions" onclick="showTab('questions')">💬 الأسئلة</button>
+      <button class="tab" data-tab="archive" onclick="showTab('archive')">🗄️ الأرشيف</button>
       <button class="tab" data-tab="presslog" onclick="showTab('presslog')">🧾 سجل الضغطات</button>
       <button class="tab" data-tab="history" onclick="showTab('history')">🕘 النسخ السابقة</button>
       <button class="tab" data-tab="help" onclick="showTab('help')">💡 مساعدة</button>
@@ -212,7 +213,26 @@
       </div>
       <div class="toolbar"><input id="qSearch" placeholder="🔍 ابحث في الأسئلة..." oninput="renderQuestions()"></div>
       <div class="card" style="padding:0;overflow:auto"><table id="qTable"></table></div>
-      <p class="muted">الأسئلة بتتجمع: لو أكتر من عميل سأل نفس السؤال، بيظهر العدد جنبه. مفيش أي بيانات شخصية محفوظة.</p>
+      <p class="muted">الأسئلة غير المُجاب عنها فقط تظهر هنا. الأسئلة التي تم الرد عليها تنتقل تلقائيًا إلى الأرشيف، وتظل موجودة في سجل العميل.</p>
+    </div>
+
+    <!-- أرشيف الأسئلة -->
+    <div id="tab-archive" class="hidden">
+      <div class="row" style="margin-bottom:12px">
+        <h2 style="margin:0">🗄️ أرشيف الأسئلة</h2>
+        <div class="row" style="gap:6px">
+          <button class="ghost" onclick="loadQuestions()">🔄 تحديث</button>
+          <button class="ghost" onclick="exportArchive()">📥 تصدير الأرشيف</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <input id="aSearch" placeholder="🔍 ابحث في السؤال أو الإجابة..." oninput="renderArchive()">
+        <label class="muted">من: <input id="aFrom" type="date" onchange="renderArchive()" style="width:auto"></label>
+        <label class="muted">إلى: <input id="aTo" type="date" onchange="renderArchive()" style="width:auto"></label>
+        <button class="ghost" onclick="clearArchiveFilters()">كل الأرشيف</button>
+      </div>
+      <div class="card" style="padding:0;overflow:auto"><table id="aTable"></table></div>
+      <p class="muted">يمكنك التصفية حسب تاريخ السؤال. الإجابة ووقت إرسالها محفوظان مع كل سجل.</p>
     </div>
 
     <!-- سجل الضغطات -->
@@ -386,9 +406,10 @@ function dropDraft() {
 // ---------- التنقل ----------
 function showTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  ["stats", "menu", "questions", "presslog", "history", "help"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
+  ["stats", "menu", "questions", "archive", "presslog", "history", "help"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
   if (name === "stats") loadStats();
   if (name === "questions") loadQuestions();
+  if (name === "archive") loadQuestions();
   if (name === "presslog") loadPressLog();
   if (name === "history") loadHistory();
 }
@@ -1135,6 +1156,7 @@ async function loadQuestions() {
   try {
     questionsCache = (await api("questions")).questions;
     renderQuestions();
+    renderArchive();
   } catch (e) { toast(e.message, "bad"); }
 }
 
@@ -1142,8 +1164,8 @@ function renderQuestions() {
   const t = $("qTable");
   const q = ($("qSearch").value || "").trim();
   const counts = {};
-  questionsCache.forEach((x) => { const k = normQ(x.q); counts[k] = (counts[k] || 0) + 1; });
-  const rows = questionsCache.filter((x) => !q || x.q.includes(q));
+  questionsCache.filter((x) => x.status !== "answered").forEach((x) => { const k = normQ(x.q); counts[k] = (counts[k] || 0) + 1; });
+  const rows = questionsCache.filter((x) => x.status !== "answered" && (!q || x.q.includes(q)));
   if (!rows.length) { t.innerHTML = '<tr><td class="muted">مفيش أسئلة بعد</td></tr>'; return; }
   t.innerHTML = `<tr><th>السؤال</th><th>عدد مرات</th><th>الوقت</th><th>الإجابة</th><th></th></tr>` + rows.map((x) => `
     <tr>
@@ -1164,10 +1186,11 @@ async function sendAnswer(id, savedAnswer = "") {
   const ok = await confirmBox(savedAnswer ? "هتتعاد الإجابة للعميل صاحب السؤال فقط. متأكد؟" : "هتتبعت الإجابة للعميل صاحب السؤال فقط. متأكد؟", savedAnswer ? "إعادة الإرسال" : "تم الإرسال", false);
   if (!ok) return;
   try {
-    await api("answerQuestion", { ref: id, answer });
+    const result = await api("answerQuestion", { ref: id, answer });
     const item = questionsCache.find((x) => x.id === id);
-    if (item) { item.answer = answer; item.status = "answered"; item.answeredAt = Date.now(); }
+    if (item) { item.answer = answer; item.status = "answered"; item.answeredAt = result.question?.answeredAt || Date.now(); item.raw = result.question?.raw || item.raw; }
     renderQuestions();
+    renderArchive();
     toast("تم إرسال الإجابة للعميل", "ok");
   } catch (e) { toast(e.message, "bad"); }
 }
@@ -1175,6 +1198,59 @@ async function sendAnswer(id, savedAnswer = "") {
 function toggleAnswer(id) {
   const el = document.getElementById(`answer-edit-${id}`);
   if (el) el.classList.toggle("hidden");
+}
+
+function archiveRows() {
+  const q = ($("aSearch")?.value || "").trim().toLowerCase();
+  const from = $("aFrom")?.value || "";
+  const to = $("aTo")?.value || "";
+  return questionsCache.filter((x) => {
+    if (x.status !== "answered") return false;
+    const day = cairoDate(x.t);
+    const text = `${x.q || ""} ${x.answer || ""}`.toLowerCase();
+    return (!q || text.includes(q)) && (!from || day >= from) && (!to || day <= to);
+  });
+}
+
+function renderArchive() {
+  const t = $("aTable");
+  if (!t) return;
+  const rows = archiveRows();
+  if (!rows.length) { t.innerHTML = '<tr><td class="muted">مفيش أسئلة مؤرشفة حسب الفلتر الحالي</td></tr>'; return; }
+  t.innerHTML = `<tr><th>السؤال</th><th>الإجابة</th><th>وقت السؤال</th><th>وقت الرد</th><th>العميل</th><th></th></tr>` + rows.map((x) => `
+    <tr>
+      <td style="white-space:pre-wrap">${esc(x.q)}</td>
+      <td style="white-space:pre-wrap;min-width:240px">${esc(x.answer || "")}</td>
+      <td>${fmtTime(x.t)}</td>
+      <td>${x.answeredAt ? fmtTime(x.answeredAt) : "—"}</td>
+      <td>${x.chatId ? `<button class="ghost" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : "—"}</td>
+      <td><button class="ghost" onclick='editArchiveAnswer(${JSON.stringify(x.id)})'>📝 تعديل/إرسال</button></td>
+    </tr>`).join("");
+}
+
+function clearArchiveFilters() {
+  $("aSearch").value = "";
+  $("aFrom").value = "";
+  $("aTo").value = "";
+  renderArchive();
+}
+
+function editArchiveAnswer(id) {
+  const item = questionsCache.find((x) => x.id === id);
+  if (!item) return;
+  modal(`<h2 style="margin:0 0 10px">📝 تعديل إجابة مؤرشفة</h2>
+    <textarea id="archive-answer-${esc(id)}" rows="6">${esc(item.answer || "")}</textarea>
+    <div class="row" style="margin-top:12px">
+      <button class="ok" onclick='sendArchiveAnswer(${JSON.stringify(id)})'>📤 إرسال التعديل</button>
+      <button class="ghost" data-r="0">إغلاق</button>
+    </div>`);
+}
+
+function sendArchiveAnswer(id) {
+  const input = document.getElementById(`archive-answer-${id}`);
+  const answer = input?.value.trim() || "";
+  if (!answer) return toast("اكتب الإجابة أولاً", "bad");
+  sendAnswer(id, answer);
 }
 
 async function deleteQ(raw) {
@@ -1189,8 +1265,14 @@ async function deleteQ(raw) {
 }
 
 function exportQuestions() {
-  csvDownload(`الأسئلة_${today()}.csv`, [["التاريخ", "السؤال"],
-    ...questionsCache.map((x) => [fmtTime(x.t), x.q])]);
+  csvDownload(`الأسئلة_الحالية_${today()}.csv`, [["وقت السؤال", "السؤال", "الحالة", "الإجابة", "وقت الرد", "عدد أسئلة العميل"],
+    ...questionsCache.filter((x) => x.status !== "answered").map((x) => [fmtTime(x.t), x.q, x.status || "open", x.answer || "", x.answeredAt ? fmtTime(x.answeredAt) : "", x.chatId ? customerQuestions(x.chatId).length : ""]) ]);
+}
+
+function exportArchive() {
+  const rows = archiveRows();
+  csvDownload(`أرشيف_الأسئلة_${today()}.csv`, [["وقت السؤال", "السؤال", "الإجابة", "وقت الرد", "الحالة", "معرّف العميل", "عدد أسئلة العميل"],
+    ...rows.map((x) => [fmtTime(x.t), x.q, x.answer || "", x.answeredAt ? fmtTime(x.answeredAt) : "", x.status || "answered", x.chatId || "", x.chatId ? customerQuestions(x.chatId).length : ""]) ]);
 }
 
 function fmtTime(ms) {
