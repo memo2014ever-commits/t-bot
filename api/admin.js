@@ -1,13 +1,14 @@
 // خادم لوحة التحكم: تسجيل دخول بدورين (أدمن / محرر)، وقراءة وحفظ وسجل نسخ من GitHub
 // كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
 import { timingSafeEqual } from "crypto";
-import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched } from "./stats.js";
+import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, answerQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched } from "./stats.js";
 
 const {
   ADMIN_USER, ADMIN_PASS,          // الأدمن: يعدّل ويحذف
   EDITOR_USER, EDITOR_PASS,        // المحرر (اختياري): يعدّل ومايحذفش
   GITHUB_TOKEN, GITHUB_REPO,
   GITHUB_FILE = "content.json", GITHUB_BRANCH = "main",
+  BOT_TOKEN,
 } = process.env;
 
 const API = `https://api.github.com/repos/${GITHUB_REPO}/contents/${GITHUB_FILE}`;
@@ -58,10 +59,22 @@ async function readCurrent(ref = GITHUB_BRANCH) {
   return { sha: j.sha, content: JSON.parse(Buffer.from(j.content, "base64").toString("utf8")) };
 }
 
+async function sendTelegram(chatId, answer) {
+  if (!BOT_TOKEN) throw new Error("BOT_TOKEN غير مضبوط على السيرفر");
+  const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text: `📩 رد على سؤالك:\n\n${answer}` }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok) throw new Error(j.description || "فشل إرسال الإجابة إلى تيليجرام");
+  return j.result;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "method" });
 
-  const { username, password, action, content, message, ref } = req.body || {};
+  const { username, password, action, content, message, ref, answer } = req.body || {};
   const role = authenticate(username, password);
   if (!role) return res.status(401).json({ error: "اسم المستخدم أو الباسورد غلط" });
 
@@ -84,6 +97,21 @@ export default async function handler(req, res) {
 
     if (action === "questions") {
       return res.json({ questions: await getQuestions() });
+    }
+
+    if (action === "answerQuestion") {
+      if (typeof ref !== "string" || ref.length > 200) return res.status(400).json({ error: "السؤال غير صحيح" });
+      if (typeof answer !== "string" || !answer.trim() || answer.length > 3500) {
+        return res.status(400).json({ error: "الإجابة مطلوبة وبحد أقصى 3500 حرف" });
+      }
+      const questions = await getQuestions();
+      const question = questions.find((x) => x.id === ref || x.raw === ref);
+      if (!question) return res.status(404).json({ error: "السؤال غير موجود" });
+      if (!question.chatId) return res.status(400).json({ error: "السؤال قديم ولا يحتوي على معرّف العميل" });
+      await sendTelegram(question.chatId, answer.trim());
+      const updated = await answerQuestion(ref, answer.trim());
+      if (!updated || updated.error) return res.status(500).json({ error: updated?.error || "فشل تحديث حالة السؤال" });
+      return res.json({ ok: true, question: updated });
     }
 
     if (action === "delq") {

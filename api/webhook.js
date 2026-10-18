@@ -274,7 +274,7 @@ bot.on("message:text", async (ctx) => {
     let allowed = true;
     try { allowed = await questionAllowed(ctx.chat.id); } catch {}
     if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(root));
-    try { await pushQuestion(text); } catch {}
+    try { await pushQuestion(text, ctx.chat.id); } catch {}
     const left = await questionsLeft(ctx.chat.id).catch(() => 0);
     const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
     return ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));

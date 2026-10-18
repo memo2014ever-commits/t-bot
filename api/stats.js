@@ -1,4 +1,6 @@
 // الإحصائيات والأسئلة وسجل الضغطات في Upstash Redis (REST). أي فشل ما يوقفش البوت
+import { createHash, randomUUID } from "crypto";
+
 const URL_R = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN_R = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 
@@ -65,12 +67,13 @@ export async function getUnmatched() {
 export async function deleteUnmatched(word) { await redis(["HDEL", "unmatched", word]); }
 export async function clearUnmatched() { await redis(["DEL", "unmatched"]); }
 
-export async function pushQuestion(text) {
-  await redis(["LPUSH", "questions", JSON.stringify({ t: Date.now(), q: String(text).slice(0, 500) })]);
+export async function pushQuestion(text, chatId) {
+  await redis(["LPUSH", "questions", JSON.stringify({
+    id: randomUUID(), t: Date.now(), q: String(text).slice(0, 500), chatId: String(chatId), status: "open",
+  })]);
   if (Math.random() < 0.05) await redis(["LTRIM", "questions", 0, 499]);
 }
 
-import { createHash } from "crypto";
 const MAX_QUESTIONS = 3;
 const WINDOW_SECONDS = 86400;
 function qKey(chatId) { return `qrate:${createHash("sha256").update(String(chatId)).digest("hex").slice(0, 16)}`; }
@@ -90,6 +93,29 @@ export async function getQuestions() {
   return raw.map((r) => ({ raw: r, ...JSON.parse(r) }));
 }
 export async function deleteQuestion(raw) { await redis(["LREM", "questions", 1, raw]); }
+
+export async function answerQuestion(ref, answer) {
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const index = raw.findIndex((r) => {
+    try {
+      const item = JSON.parse(r);
+      return item.id === ref || r === ref;
+    } catch { return r === ref; }
+  });
+  if (index < 0) return null;
+
+  const item = JSON.parse(raw[index]);
+  if (!item.chatId) return { error: "السؤال قديم ولا يحتوي على معرّف العميل" };
+  const updated = {
+    ...item,
+    answer: String(answer).slice(0, 3500),
+    status: "answered",
+    answeredAt: Date.now(),
+  };
+  const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
+  if (result === null) return null;
+  return { ...updated, raw: JSON.stringify(updated) };
+}
 
 // لا يوجد قص للسجل؛ يعرض كل السجل التاريخي المتاح.
 export async function getPressLog() {
