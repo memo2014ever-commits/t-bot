@@ -1126,13 +1126,31 @@ function renderQuestions() {
   questionsCache.forEach((x) => { const k = normQ(x.q); counts[k] = (counts[k] || 0) + 1; });
   const rows = questionsCache.filter((x) => !q || x.q.includes(q));
   if (!rows.length) { t.innerHTML = '<tr><td class="muted">مفيش أسئلة بعد</td></tr>'; return; }
-  t.innerHTML = `<tr><th>السؤال</th><th>عدد مرات</th><th>الوقت</th><th></th></tr>` + rows.map((x) => `
+  t.innerHTML = `<tr><th>السؤال</th><th>عدد مرات</th><th>الوقت</th><th>الإجابة</th><th></th></tr>` + rows.map((x) => `
     <tr>
       <td style="white-space:pre-wrap">${esc(x.q)}</td>
       <td>${counts[normQ(x.q)] > 1 ? `<span class="chip">${counts[normQ(x.q)]}</span>` : "1"}</td>
       <td>${fmtTime(x.t)}</td>
+      <td style="min-width:280px">
+        ${x.status === "answered" ? `<div class="status ok">✅ تم الإرسال<br><span class="muted" style="white-space:pre-wrap">${esc(x.answer || "")}</span></div>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick="sendAnswer(${JSON.stringify(x.id)})">📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
+      </td>
       <td><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
     </tr>`).join("");
+}
+
+async function sendAnswer(id) {
+  const input = document.getElementById(`answer-${id}`);
+  const answer = input?.value.trim() || "";
+  if (!answer) return toast("اكتب الإجابة أولاً", "bad");
+  const ok = await confirmBox("هتتبعت الإجابة للعميل صاحب السؤال فقط. متأكد؟", "تم الإرسال", false);
+  if (!ok) return;
+  try {
+    await api("answerQuestion", { ref: id, answer });
+    const item = questionsCache.find((x) => x.id === id);
+    if (item) { item.answer = answer; item.status = "answered"; item.answeredAt = Date.now(); }
+    renderQuestions();
+    toast("تم إرسال الإجابة للعميل", "ok");
+  } catch (e) { toast(e.message, "bad"); }
 }
 
 async function deleteQ(raw) {
