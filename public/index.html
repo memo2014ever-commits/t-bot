@@ -116,6 +116,10 @@
   .kbd { display:grid; gap:6px; margin-top:10px; }
   .kbd div { background:#dfe8f7; color:#1e4fb3; text-align:center; padding:9px; border-radius:8px; font-size:14px; }
   .modal .row { justify-content:flex-start; }
+  .q-actions { display:flex; gap:4px; align-items:center; flex-wrap:nowrap; white-space:nowrap; }
+  .q-actions button { padding:6px 8px; font-size:12px; }
+  .q-archive-table { table-layout:auto; }
+  .q-archive-table th, .q-archive-table td { padding:7px 6px; }
 
   @media (max-width:600px) { .tab { padding:8px 10px; font-size:14px; } header h1 { font-size:16px; } .toolbar input { max-width:100%; } }
 </style>
@@ -231,7 +235,7 @@
         <label class="muted">إلى: <input id="aTo" type="date" onchange="renderArchive()" style="width:auto"></label>
         <button class="ghost" onclick="clearArchiveFilters()">كل الأرشيف</button>
       </div>
-      <div class="card" style="padding:0;overflow:auto"><table id="aTable"></table></div>
+      <div class="card" style="padding:0;overflow:auto"><table id="aTable" class="q-archive-table"></table></div>
       <p class="muted">يمكنك التصفية حسب تاريخ السؤال. الإجابة ووقت إرسالها محفوظان مع كل سجل.</p>
     </div>
 
@@ -1223,10 +1227,10 @@ function renderArchive() {
     <tr>
       <td>${esc(x.customerName || "غير معروف")}<br>${x.chatId ? `<button class="ghost" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}</td>
       <td style="white-space:pre-wrap">${esc(x.q)}</td>
-      <td style="white-space:pre-wrap;min-width:240px">${esc(x.answer || "")}</td>
+      <td style="white-space:pre-wrap">${esc(x.answer || "")}</td>
       <td>${fmtTime(x.t)}</td>
       <td>${x.answeredAt ? fmtTime(x.answeredAt) : "—"}</td>
-      <td><button class="ghost" onclick='editArchiveAnswer(${JSON.stringify(x.id)})'>📝 تعديل/إرسال</button><br><button class="danger" style="margin-top:6px" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑 حذف</button></td>
+      <td><div class="q-actions"><button class="ghost" onclick='editArchiveAnswer(${JSON.stringify(x.id)})'>📝 تعديل/إرسال</button><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑 حذف</button></div></td>
     </tr>`).join("");
 }
 
