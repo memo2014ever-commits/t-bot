@@ -67,9 +67,9 @@ export async function getUnmatched() {
 export async function deleteUnmatched(word) { await redis(["HDEL", "unmatched", word]); }
 export async function clearUnmatched() { await redis(["DEL", "unmatched"]); }
 
-export async function pushQuestion(text, chatId) {
+export async function pushQuestion(text, chatId, customerName = "") {
   await redis(["LPUSH", "questions", JSON.stringify({
-    id: randomUUID(), t: Date.now(), q: String(text).slice(0, 500), chatId: String(chatId), status: "open",
+    id: randomUUID(), t: Date.now(), q: String(text).slice(0, 500), chatId: String(chatId), customerName: String(customerName).slice(0, 150), status: "open",
   })]);
   if (Math.random() < 0.05) await redis(["LTRIM", "questions", 0, 499]);
 }
