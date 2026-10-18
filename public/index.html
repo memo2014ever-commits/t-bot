@@ -1110,6 +1110,25 @@ function onWordsEdit(v) {
   markDirty();
 }
 function normQ(q) { return q.trim().replace(/\s+/g, " ").toLowerCase(); }
+function customerQuestions(chatId) {
+  return chatId ? questionsCache.filter((x) => x.chatId === chatId) : [];
+}
+
+function showCustomerHistory(chatId) {
+  const items = customerQuestions(chatId);
+  if (!items.length) return;
+  const body = items.map((x, i) => `
+    <div class="card" style="margin:8px 0;padding:12px">
+      <div class="row" style="margin-bottom:6px"><b>السؤال ${items.length - i}</b><span class="${x.status === "answered" ? "status ok" : "status warn"}">${x.status === "answered" ? "✅ تم الإرسال" : "⏳ لم تتم الإجابة"}</span></div>
+      <div style="white-space:pre-wrap">${esc(x.q)}</div>
+      <div class="muted" style="margin-top:5px">${fmtTime(x.t)}</div>
+      ${x.status === "answered" ? `<div style="margin-top:8px;padding:8px;background:var(--soft);border-radius:8px;white-space:pre-wrap"><b>الإجابة:</b>\n${esc(x.answer || "")}</div>` : ""}
+    </div>`).join("");
+  modal(`<h2 style="margin:0 0 10px">👤 سجل أسئلة العميل</h2>
+    <p class="muted">عدد الأسئلة المسجلة لهذا العميل: ${items.length}</p>
+    <div style="max-height:60vh;overflow:auto">${body}</div>
+    <div class="row" style="margin-top:14px"><button class="ghost" data-r="0">إغلاق</button></div>`);
+}
 
 async function loadQuestions() {
   renderWordsBox();
@@ -1134,7 +1153,7 @@ function renderQuestions() {
       <td style="min-width:280px">
         ${x.status === "answered" ? `<div class="status ok">✅ تم الإرسال<br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>💾 حفظ وإرسال التعديل</button></div></div>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
       </td>
-      <td><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
+      <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}<button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
     </tr>`).join("");
 }
 
