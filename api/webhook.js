@@ -231,6 +231,12 @@ bot.on("message:text", async (ctx) => {
   const text = ctx.message.text || "";
   const root = render(content, "").markup;
 
+  // الإجابة المرسلة من لوحة الإدارة ليست محادثة مفتوحة؛ السؤال الجديد يبدأ من زر الأسئلة.
+  const repliedText = ctx.message.reply_to_message?.text || "";
+  if (ctx.message.reply_to_message?.from?.is_bot && repliedText.startsWith("📩 رد على سؤالك:")) {
+    return ctx.reply("لو عندك سؤال جديد، اضغط على زر «ابعت سؤالك» واكتبه هناك 👇", HTML_OPTS(root));
+  }
+
   // 1) السؤال الطبي: يتحوّل للخط الساخن
   if (hasMedical(text, content.medicalKeywords)) {
     return ctx.reply(toHtml(m.medical || DEFAULT_MEDICAL), HTML_OPTS(root));
