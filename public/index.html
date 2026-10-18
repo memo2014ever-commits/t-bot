@@ -1132,7 +1132,7 @@ function renderQuestions() {
       <td>${counts[normQ(x.q)] > 1 ? `<span class="chip">${counts[normQ(x.q)]}</span>` : "1"}</td>
       <td>${fmtTime(x.t)}</td>
       <td style="min-width:280px">
-        ${x.status === "answered" ? `<div class="status ok">✅ تم الإرسال<br><span class="muted" style="white-space:pre-wrap">${esc(x.answer || "")}</span><br><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button></div>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
+        ${x.status === "answered" ? `<div class="status ok">✅ تم الإرسال<br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>💾 حفظ وإرسال التعديل</button></div></div>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
       </td>
       <td><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
     </tr>`).join("");
@@ -1151,6 +1151,11 @@ async function sendAnswer(id, savedAnswer = "") {
     renderQuestions();
     toast("تم إرسال الإجابة للعميل", "ok");
   } catch (e) { toast(e.message, "bad"); }
+}
+
+function toggleAnswer(id) {
+  const el = document.getElementById(`answer-edit-${id}`);
+  if (el) el.classList.toggle("hidden");
 }
 
 async function deleteQ(raw) {
