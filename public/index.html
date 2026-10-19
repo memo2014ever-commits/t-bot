@@ -1193,7 +1193,7 @@ function renderQuestions() {
       <td>${counts[normQ(x.q)] > 1 ? `<span class="chip">${counts[normQ(x.q)]}</span>` : "1"}</td>
       <td>${fmtTime(x.t)}</td>
       <td style="min-width:280px">
-        ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>💾 حفظ وإرسال التعديل</button></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد<br><button class="ghost" style="margin-top:6px" onclick='showFollowup(${JSON.stringify(x.id)})'>📩 عرض متابعة العميل</button><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال الرد</button>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
+        ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">المتابعات: ${x.followups?.length || 0}/3<br>${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>💾 حفظ وإرسال التعديل</button></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد<br><button class="ghost" style="margin-top:6px" onclick='showFollowup(${JSON.stringify(x.id)})'>📩 عرض متابعة العميل</button><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال الرد</button>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
       </td>
       <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}<button class="ghost" style="margin-bottom:6px" onclick='closeQuestionFromPanel(${JSON.stringify(x.id)})'>🔒 إغلاق</button><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
     </tr>`).join("");
@@ -1241,16 +1241,29 @@ function archiveRows() {
   });
 }
 
+function shortText(text, max = 90) {
+  const s = String(text || "").replace(/\s+/g, " ").trim();
+  return s.length > max ? s.slice(0, max) + "…" : s;
+}
+
+function showConversation(id) {
+  const item = questionsCache.find((x) => x.id === id);
+  if (!item) return;
+  const answers = answerEntries(item).map((a, i) => `<div class="card" style="margin:7px 0;padding:9px"><b>الإجابة ${i + 1}</b><br><span style="white-space:pre-wrap">${esc(a.text || "")}</span><br><span class="muted">${fmtTime(a.t)}</span><br><button class="ghost" style="margin-top:4px" onclick='editAnswerHistory(${JSON.stringify(id)}, ${i})'>📝 تعديل</button></div>`).join("");
+  const followups = (item.followups || []).map((f, i) => `<div class="card" style="margin:7px 0;padding:9px;border-right:3px solid var(--accent)"><b>متابعة ${i + 1}</b><br><span style="white-space:pre-wrap">${esc(f.text || "")}</span><br><span class="muted">${fmtTime(f.t)}</span></div>`).join("");
+  modal(`<h2 style="margin:0 0 8px">🗂️ محادثة السؤال</h2><div class="muted" style="white-space:pre-wrap">${esc(item.q)}</div><div style="max-height:60vh;overflow:auto;margin-top:8px">${answers}${followups}</div><div class="row" style="margin-top:10px"><button class="ghost" data-r="0">إغلاق</button></div>`);
+}
+
 function renderArchive() {
   const t = $("aTable");
   if (!t) return;
   const rows = archiveRows();
   if (!rows.length) { t.innerHTML = '<tr><td class="muted">مفيش أسئلة مؤرشفة حسب الفلتر الحالي</td></tr>'; return; }
-  t.innerHTML = `<tr><th>العميل</th><th>السؤال</th><th>الإجابة</th><th>وقت السؤال</th><th>وقت الرد</th><th></th></tr>` + rows.map((x) => `
+  t.innerHTML = `<tr><th>العميل</th><th>السؤال</th><th>ملخص الإجابة</th><th>وقت السؤال</th><th>وقت الرد</th><th></th></tr>` + rows.map((x) => `
     <tr>
       <td>${esc(x.customerName || "غير معروف")}<br>${x.chatId ? `<button class="ghost" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}</td>
       <td style="white-space:pre-wrap">${esc(x.q)}</td>
-      <td style="white-space:pre-wrap">${answerEntries(x).map((a, ai) => `<div style="margin-bottom:6px"><b>${ai + 1}.</b> ${esc(a.text || "")}<br><button class="ghost" onclick='editAnswerHistory(${JSON.stringify(x.id)}, ${ai})'>📝 تعديل</button></div>`).join("")}</td>
+      <td><span class="muted">${answerEntries(x).length} إجابات</span><br><span>${esc(shortText(x.answer || answerEntries(x).at(-1)?.text || ""))}</span><br><button class="ghost" style="margin-top:4px" onclick='showConversation(${JSON.stringify(x.id)})'>🗂️ عرض المحادثة</button></td>
       <td>${fmtTime(x.t)}</td>
       <td>${x.answeredAt ? fmtTime(x.answeredAt) : "—"}</td>
       <td><div class="q-actions"><button class="ghost" onclick='editArchiveAnswer(${JSON.stringify(x.id)})'>📝 تعديل/إرسال</button><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑 حذف</button></div></td>
