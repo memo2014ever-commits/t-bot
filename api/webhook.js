@@ -1,11 +1,16 @@
 // بوت تلجرام: قايمة + رجوع + روابط + زرار سؤال + بحث بالكلمات + تحويل الطبي للخط الساخن
 import { Bot, InlineKeyboard, webhookCallback } from "grammy";
 import {
-  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched,
+  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, questionForReply, addFollowup, closeExpiredQuestions,
 } from "./stats.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
 const bot = new Bot(process.env.BOT_TOKEN);
+
+const DEFAULT_CLOSED_AUTO = "🔒 تم إغلاق سؤالك تلقائيًا لعدم وجود متابعة خلال 24 ساعة.\n\nإذا كان لديك استفسار جديد، استخدم زر «ابعت سؤالك» 👇";
+async function notifyExpired(items, message = DEFAULT_CLOSED_AUTO) {
+  await Promise.all((items || []).map((x) => bot.api.sendMessage(x.chatId, message).catch(() => {})));
+}
 
 // الرسايل الافتراضية (تتغير من ⚙️ رسايل النظام في اللوحة)
 const DEFAULT_PROMPT = "اكتب سؤالك هنا 👇";
@@ -15,6 +20,8 @@ const DEFAULT_DYM = "تقصد؟ اختار من دول 👇";
 const DEFAULT_MEDICAL = "السؤال ده محتاج متابعة طبية، ومش هقدر أرد عليه هنا.\nللمساعدة اتصل بالخط الساخن 19806 📞";
 const DEFAULT_LIMIT = "استنفدت عدد الأسئلة المسموحة ({max}) خلال 24 ساعة 🙏\nتقدر تسأل تاني بعد 24 ساعة من أول سؤال.";
 const DEFAULT_LEFT = "(باقي لك {left} أسئلة خلال 24 ساعة)";
+const DEFAULT_FOLLOWUP_RECEIVED = "تم استلام المتابعة على نفس السؤال ✅\nسيتم الرد عليك هنا.";
+const DEFAULT_FOLLOWUP_LIMIT = "تم الوصول للحد الأقصى للمتابعات على هذا السؤال. لو عندك استفسار جديد، استخدم زر «ابعت سؤالك» 👇";
 const DEFAULT_INQUIRY = "للاستعلام عن موعدك أو حجزك، ادخل على بوت الحجز مباشرة 👇";
 const DEFAULT_INQUIRY_WORDS = ["استعلم", "استعلام", "موعدي", "حجزي", "متابعه", "حاله الطلب", "رقم الطلب"];
 const DEFAULT_MED_WORDS = ["علاج", "دوا", "دواء", "ادويه", "اعراض", "الم", "وجع", "مرض", "جرعه", "تشخيص", "حساسيه", "حراره"];
@@ -228,10 +235,24 @@ bot.on("message:text", async (ctx) => {
   try { await trackActive(ctx.chat.id); } catch {}
   const content = await getContent().catch(() => ({}));
   const m = content.messages || {};
+  try { await notifyExpired(await closeExpiredQuestions(), m.autoClosed || DEFAULT_CLOSED_AUTO); } catch {}
   const text = ctx.message.text || "";
   const root = render(content, "").markup;
 
-  // الإجابة المرسلة من لوحة الإدارة ليست محادثة مفتوحة؛ السؤال الجديد يبدأ من زر الأسئلة.
+  // Reply على رسالة إجابة الإدارة = متابعة مؤقتة لنفس السؤال، وليس سؤالًا جديدًا.
+  const repliedMessageId = ctx.message.reply_to_message?.message_id;
+  if (ctx.message.reply_to_message?.from?.is_bot && repliedMessageId) {
+    const parent = await questionForReply(ctx.chat.id, repliedMessageId).catch(() => null);
+    if (parent) {
+      const followup = await addFollowup(parent.id, text).catch(() => null);
+      if (followup?.limitReached) {
+        return ctx.reply(m.followupLimit || DEFAULT_FOLLOWUP_LIMIT, HTML_OPTS(root));
+      }
+      if (followup) return ctx.reply(m.followupReceived || DEFAULT_FOLLOWUP_RECEIVED, HTML_OPTS(root));
+    }
+  }
+
+  // الإجابة القديمة أو المنتهية ليست محادثة مفتوحة؛ السؤال الجديد يبدأ من زر الأسئلة.
   const repliedText = ctx.message.reply_to_message?.text || "";
   if (ctx.message.reply_to_message?.from?.is_bot && repliedText.startsWith("📩 رد على سؤالك:")) {
     return ctx.reply("لو عندك سؤال جديد، اضغط على زر «ابعت سؤالك» واكتبه هناك 👇", HTML_OPTS(root));

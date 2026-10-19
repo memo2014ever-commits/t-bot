@@ -1,7 +1,7 @@
 // خادم لوحة التحكم: تسجيل دخول بدورين (أدمن / محرر)، وقراءة وحفظ وسجل نسخ من GitHub
 // كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
 import { timingSafeEqual } from "crypto";
-import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, answerQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched } from "./stats.js";
+import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched } from "./stats.js";
 
 const {
   ADMIN_USER, ADMIN_PASS,          // الأدمن: يعدّل ويحذف
@@ -59,22 +59,28 @@ async function readCurrent(ref = GITHUB_BRANCH) {
   return { sha: j.sha, content: JSON.parse(Buffer.from(j.content, "base64").toString("utf8")) };
 }
 
-async function sendTelegram(chatId, answer) {
+async function sendTelegram(chatId, answer, messages = {}) {
   if (!BOT_TOKEN) throw new Error("BOT_TOKEN غير مضبوط على السيرفر");
   const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text: `📩 رد على سؤالك:\n\n${answer}` }),
+    body: JSON.stringify({ chat_id: chatId, text: `📩 رد على سؤالك:\n\n${answer}${messages.answerFooter || "\n\n━━━━━━━━━━━━\n📌 للمتابعة على نفس السؤال: اضغط Reply / رد على هذه الرسالة واكتب استفسارك.\n🆕 لسؤال جديد: استخدم زر «ابعت سؤالك»."}`, reply_markup: { force_reply: true, input_field_placeholder: messages.followupPlaceholder || "اكتب متابعة السؤال هنا..." } }),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.ok) throw new Error(j.description || "فشل إرسال الإجابة إلى تيليجرام");
   return j.result;
 }
 
+async function sendCloseNotice(chatId, automatic = false, messages = {}) {
+  if (!BOT_TOKEN || !chatId) return;
+  const text = automatic ? (messages.autoClosed || "🔒 تم إغلاق سؤالك تلقائيًا لعدم وجود متابعة خلال 24 ساعة.\n\nإذا كان لديك استفسار جديد، استخدم زر «ابعت سؤالك» 👇") : (messages.manualClosed || "🔒 تم إغلاق هذا السؤال من الإدارة.\n\nإذا كان لديك استفسار جديد، استخدم زر «ابعت سؤالك» 👇");
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text }) });
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "method" });
 
-  const { username, password, action, content, message, ref, answer } = req.body || {};
+  const { username, password, action, content, message, ref, answer, answerIndex } = req.body || {};
   const role = authenticate(username, password);
   if (!role) return res.status(401).json({ error: "اسم المستخدم أو الباسورد غلط" });
 
@@ -96,6 +102,9 @@ export default async function handler(req, res) {
     }
 
     if (action === "questions") {
+      const expired = await closeExpiredQuestions();
+      const systemMessages = (await readCurrent()).content.messages || {};
+      await Promise.all(expired.map((x) => sendCloseNotice(x.chatId, true, systemMessages).catch(() => {})));
       return res.json({ questions: await getQuestions() });
     }
 
@@ -108,9 +117,33 @@ export default async function handler(req, res) {
       const question = questions.find((x) => x.id === ref || x.raw === ref);
       if (!question) return res.status(404).json({ error: "السؤال غير موجود" });
       if (!question.chatId) return res.status(400).json({ error: "السؤال قديم ولا يحتوي على معرّف العميل" });
-      await sendTelegram(question.chatId, answer.trim());
-      const updated = await answerQuestion(ref, answer.trim());
+      const systemMessages = (await readCurrent()).content.messages || {};
+      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages);
+      const updated = await answerQuestion(ref, answer.trim(), telegramMessage.message_id);
       if (!updated || updated.error) return res.status(500).json({ error: updated?.error || "فشل تحديث حالة السؤال" });
+      return res.json({ ok: true, question: updated });
+    }
+
+    if (action === "editAnswer") {
+      if (typeof ref !== "string" || ref.length > 200 || !Number.isInteger(answerIndex) || answerIndex < 0) return res.status(400).json({ error: "بيانات الإجابة غير صحيحة" });
+      if (typeof answer !== "string" || !answer.trim() || answer.length > 3500) return res.status(400).json({ error: "الإجابة مطلوبة وبحد أقصى 3500 حرف" });
+      const questions = await getQuestions();
+      const question = questions.find((x) => x.id === ref || x.raw === ref);
+      if (!question) return res.status(404).json({ error: "السؤال غير موجود" });
+      if (!question.chatId) return res.status(400).json({ error: "السؤال لا يحتوي على معرّف العميل" });
+      const systemMessages = (await readCurrent()).content.messages || {};
+      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages);
+      const updated = await updateAnswerHistory(ref, answerIndex, answer.trim(), telegramMessage.message_id);
+      if (!updated || updated.error) return res.status(500).json({ error: updated?.error || "فشل تحديث الإجابة" });
+      return res.json({ ok: true, question: updated });
+    }
+
+    if (action === "closeQuestion") {
+      if (typeof ref !== "string" || ref.length > 200) return res.status(400).json({ error: "السؤال غير صحيح" });
+      const updated = await closeQuestion(ref, "manual");
+      if (!updated) return res.status(404).json({ error: "السؤال غير موجود" });
+      const systemMessages = (await readCurrent()).content.messages || {};
+      await sendCloseNotice(updated.chatId, false, systemMessages).catch(() => {});
       return res.json({ ok: true, question: updated });
     }
 

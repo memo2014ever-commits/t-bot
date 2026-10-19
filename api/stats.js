@@ -94,7 +94,70 @@ export async function getQuestions() {
 }
 export async function deleteQuestion(raw) { await redis(["LREM", "questions", 1, raw]); }
 
-export async function answerQuestion(ref, answer) {
+export const FOLLOWUP_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const MAX_FOLLOWUPS = 3;
+
+export async function closeExpiredQuestions(now = Date.now()) {
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const closed = [];
+  for (let i = 0; i < raw.length; i++) {
+    try {
+      const item = JSON.parse(raw[i]);
+      if (item.status === "awaiting_followup" && item.followupUntil && item.followupUntil <= now) {
+        const updated = { ...item, status: "archived", closedAt: now, closeReason: "timeout" };
+        await redis(["LSET", "questions", i, JSON.stringify(updated)]);
+        closed.push({ ...updated, raw: JSON.stringify(updated) });
+      }
+    } catch {}
+  }
+  return closed;
+}
+
+export async function closeQuestion(ref, reason = "manual") {
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const index = raw.findIndex((r) => {
+    try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
+  });
+  if (index < 0) return null;
+  const item = JSON.parse(raw[index]);
+  if (item.status === "archived") return { ...item, raw: raw[index] };
+  const updated = { ...item, status: "archived", closedAt: Date.now(), closeReason: reason };
+  const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
+  return result === null ? null : { ...updated, raw: JSON.stringify(updated) };
+}
+
+export async function questionForReply(chatId, messageId, now = Date.now()) {
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  for (let i = 0; i < raw.length; i++) {
+    try {
+      const item = JSON.parse(raw[i]);
+      if (String(item.chatId) !== String(chatId) || item.status !== "awaiting_followup" || !item.followupUntil || item.followupUntil <= now) continue;
+      if ((item.answerMessageIds || []).map(Number).includes(Number(messageId))) return { ...item, raw: raw[i], index: i };
+    } catch {}
+  }
+  return null;
+}
+
+export async function addFollowup(ref, text, now = Date.now()) {
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const index = raw.findIndex((r) => {
+    try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
+  });
+  if (index < 0) return null;
+  const item = JSON.parse(raw[index]);
+  const followups = Array.isArray(item.followups) ? item.followups : [];
+  if (followups.length >= MAX_FOLLOWUPS) return { ...item, raw: raw[index], limitReached: true };
+  const updated = {
+    ...item,
+    status: "followup_pending",
+    lastActivityAt: now,
+    followups: [...followups, { t: now, text: String(text).slice(0, 1000) }],
+  };
+  const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
+  return result === null ? null : { ...updated, raw: JSON.stringify(updated) };
+}
+
+export async function answerQuestion(ref, answer, telegramMessageId = null) {
   const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
   const index = raw.findIndex((r) => {
     try {
@@ -106,15 +169,47 @@ export async function answerQuestion(ref, answer) {
 
   const item = JSON.parse(raw[index]);
   if (!item.chatId) return { error: "السؤال قديم ولا يحتوي على معرّف العميل" };
+  const now = Date.now();
   const updated = {
     ...item,
     answer: String(answer).slice(0, 3500),
-    status: "answered",
-    answeredAt: Date.now(),
+    status: "awaiting_followup",
+    answeredAt: now,
+    lastActivityAt: now,
+    followupUntil: now + FOLLOWUP_WINDOW_MS,
+    answerMessageIds: [...(item.answerMessageIds || []), ...(telegramMessageId ? [Number(telegramMessageId)] : [])].slice(-10),
+    answerHistory: [...(item.answerHistory || []), { t: now, text: String(answer).slice(0, 3500), messageId: telegramMessageId ? Number(telegramMessageId) : null }].slice(-10),
   };
   const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
   if (result === null) return null;
   return { ...updated, raw: JSON.stringify(updated) };
+}
+
+export async function updateAnswerHistory(ref, historyIndex, answer, telegramMessageId = null) {
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const index = raw.findIndex((r) => {
+    try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
+  });
+  if (index < 0) return null;
+  const item = JSON.parse(raw[index]);
+  const history = Array.isArray(item.answerHistory) && item.answerHistory.length
+    ? [...item.answerHistory]
+    : (item.answer ? [{ t: item.answeredAt || item.t || Date.now(), text: item.answer, messageId: null }] : []);
+  if (!Number.isInteger(historyIndex) || historyIndex < 0 || historyIndex >= history.length) return { error: "الإجابة غير موجودة" };
+  const now = Date.now();
+  history[historyIndex] = { ...history[historyIndex], text: String(answer).slice(0, 3500), editedAt: now, messageId: telegramMessageId ? Number(telegramMessageId) : history[historyIndex].messageId };
+  const updated = {
+    ...item,
+    answer: history[history.length - 1]?.text || item.answer || "",
+    answerHistory: history,
+    answeredAt: now,
+    lastActivityAt: now,
+    followupUntil: now + FOLLOWUP_WINDOW_MS,
+    status: "awaiting_followup",
+    answerMessageIds: [...(item.answerMessageIds || []), ...(telegramMessageId ? [Number(telegramMessageId)] : [])].slice(-10),
+  };
+  const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
+  return result === null ? null : { ...updated, raw: JSON.stringify(updated) };
 }
 
 // لا يوجد قص للسجل؛ يعرض كل السجل التاريخي المتاح.
