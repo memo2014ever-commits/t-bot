@@ -170,13 +170,17 @@ export async function answerQuestion(ref, answer, telegramMessageId = null) {
   const item = JSON.parse(raw[index]);
   if (!item.chatId) return { error: "السؤال قديم ولا يحتوي على معرّف العميل" };
   const now = Date.now();
+  const followupCount = Array.isArray(item.followups) ? item.followups.length : 0;
+  const closesNow = followupCount >= MAX_FOLLOWUPS;
   const updated = {
     ...item,
     answer: String(answer).slice(0, 3500),
-    status: "awaiting_followup",
+    status: closesNow ? "archived" : "awaiting_followup",
     answeredAt: now,
     lastActivityAt: now,
-    followupUntil: now + FOLLOWUP_WINDOW_MS,
+    followupUntil: closesNow ? null : now + FOLLOWUP_WINDOW_MS,
+    closedAt: closesNow ? now : item.closedAt,
+    closeReason: closesNow ? "max_followups" : item.closeReason,
     answerMessageIds: [...(item.answerMessageIds || []), ...(telegramMessageId ? [Number(telegramMessageId)] : [])].slice(-10),
     answerHistory: [...(item.answerHistory || []), { t: now, text: String(answer).slice(0, 3500), messageId: telegramMessageId ? Number(telegramMessageId) : null }].slice(-10),
   };
@@ -205,7 +209,7 @@ export async function updateAnswerHistory(ref, historyIndex, answer, telegramMes
     answeredAt: now,
     lastActivityAt: now,
     followupUntil: now + FOLLOWUP_WINDOW_MS,
-    status: "awaiting_followup",
+    status: item.status === "archived" ? "archived" : "awaiting_followup",
     answerMessageIds: [...(item.answerMessageIds || []), ...(telegramMessageId ? [Number(telegramMessageId)] : [])].slice(-10),
   };
   const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);

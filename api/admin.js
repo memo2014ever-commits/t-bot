@@ -59,12 +59,12 @@ async function readCurrent(ref = GITHUB_BRANCH) {
   return { sha: j.sha, content: JSON.parse(Buffer.from(j.content, "base64").toString("utf8")) };
 }
 
-async function sendTelegram(chatId, answer, messages = {}) {
+async function sendTelegram(chatId, answer, messages = {}, finalAnswer = false) {
   if (!BOT_TOKEN) throw new Error("BOT_TOKEN غير مضبوط على السيرفر");
   const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text: `📩 رد على سؤالك:\n\n${answer}${messages.answerFooter || "\n\n━━━━━━━━━━━━\n📌 للمتابعة على نفس السؤال: اضغط Reply / رد على هذه الرسالة واكتب استفسارك.\n🆕 لسؤال جديد: استخدم زر «ابعت سؤالك»."}`, reply_markup: { force_reply: true, input_field_placeholder: messages.followupPlaceholder || "اكتب متابعة السؤال هنا..." } }),
+    body: JSON.stringify({ chat_id: chatId, text: `📩 رد على سؤالك:\n\n${answer}${finalAnswer ? (messages.finalAnswerFooter || "\n\n🔒 تم إغلاق السؤال. لأي سؤال جديد استخدم زر «ابعت سؤالك».") : (messages.answerFooter || "\n\n📌 مسموح بحد أقصى 3 متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك».")}`, ...(finalAnswer ? {} : { reply_markup: { force_reply: true, input_field_placeholder: messages.followupPlaceholder || "اكتب متابعة السؤال هنا..." } }) }),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.ok) throw new Error(j.description || "فشل إرسال الإجابة إلى تيليجرام");
@@ -118,9 +118,10 @@ export default async function handler(req, res) {
       if (!question) return res.status(404).json({ error: "السؤال غير موجود" });
       if (!question.chatId) return res.status(400).json({ error: "السؤال قديم ولا يحتوي على معرّف العميل" });
       const systemMessages = (await readCurrent()).content.messages || {};
-      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages);
+      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages, (question.followups || []).length >= 3);
       const updated = await answerQuestion(ref, answer.trim(), telegramMessage.message_id);
       if (!updated || updated.error) return res.status(500).json({ error: updated?.error || "فشل تحديث حالة السؤال" });
+      if (updated.status === "archived") await sendCloseNotice(updated.chatId, false, systemMessages).catch(() => {});
       return res.json({ ok: true, question: updated });
     }
 
@@ -132,7 +133,7 @@ export default async function handler(req, res) {
       if (!question) return res.status(404).json({ error: "السؤال غير موجود" });
       if (!question.chatId) return res.status(400).json({ error: "السؤال لا يحتوي على معرّف العميل" });
       const systemMessages = (await readCurrent()).content.messages || {};
-      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages);
+      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages, question.status === "archived");
       const updated = await updateAnswerHistory(ref, answerIndex, answer.trim(), telegramMessage.message_id);
       if (!updated || updated.error) return res.status(500).json({ error: updated?.error || "فشل تحديث الإجابة" });
       return res.json({ ok: true, question: updated });
