@@ -495,6 +495,14 @@ function openSystemMessages() {
       ["remaining", "🔢 الجملة اللي بتتكتب بعد الشكر (اكتب {left} للرقم)", "بتوضح عدد الأسئلة الباقية", "(باقي لك {left} أسئلة خلال 24 ساعة)"],
       ["limitReached", "🚫 لما العميل يخلص أسئلته (اكتب {max} للحد)", "بتظهر لما يوصل للحد اليومي", "استنفدت عدد الأسئلة المسموحة ({max}) خلال 24 ساعة 🙏"],
     ]],
+    ["🔁 متابعة السؤال والإغلاق", "تتحكم في الرسائل التي تظهر بعد الرد أو عند إغلاق السؤال", [
+      ["answerFooter", "📌 النص أسفل كل إجابة من الإدارة", "يظهر لتوضيح Reply للسؤال نفسه وزر السؤال الجديد؛ اتركه فارغًا للافتراضي", "\n\n━━━━━━━━━━━━\n📌 للمتابعة على نفس السؤال: اضغط Reply / رد على هذه الرسالة واكتب استفسارك.\n🆕 لسؤال جديد: استخدم زر «ابعت سؤالك»."],
+      ["followupPlaceholder", "✍️ النص داخل خانة Reply", "يظهر في خانة الكتابة عند الرد على إجابة الإدارة", "اكتب متابعة السؤال هنا..."],
+      ["followupReceived", "✅ رسالة استلام المتابعة", "تظهر بعد Reply صحيح على إجابة ما زالت مفتوحة", "تم استلام المتابعة على نفس السؤال ✅\nسيتم الرد عليك هنا."],
+      ["followupLimit", "🚫 رسالة انتهاء المتابعات", "تظهر بعد تجاوز 3 متابعات لنفس السؤال", "تم الوصول للحد الأقصى للمتابعات على هذا السؤال. لو عندك استفسار جديد، استخدم زر «ابعت سؤالك» 👇"],
+      ["autoClosed", "⏱ رسالة الإغلاق التلقائي", "تظهر بعد 24 ساعة بدون متابعة", "🔒 تم إغلاق سؤالك تلقائيًا لعدم وجود متابعة خلال 24 ساعة.\n\nإذا كان لديك استفسار جديد، استخدم زر «ابعت سؤالك» 👇"],
+      ["manualClosed", "🔒 رسالة الإغلاق اليدوي", "تظهر عند ضغط الإدارة على إغلاق السؤال", "🔒 تم إغلاق هذا السؤال من الإدارة.\n\nإذا كان لديك استفسار جديد، استخدم زر «ابعت سؤالك» 👇"],
+    ]],
     ["🩺 الأسئلة الطبية", "بتظهر لما السؤال يكون عن حالة أو علاج", [
       ["medical", "📝 نص الرسالة", "بيحوّل العميل للخط الساخن", "السؤال ده محتاج متابعة طبية... للمساعدة اتصل بالخط الساخن 19806 📞"],
     ], "medicalKeywords"],
@@ -1138,6 +1146,10 @@ function normQ(q) { return q.trim().replace(/\s+/g, " ").toLowerCase(); }
 function customerQuestions(chatId) {
   return chatId ? questionsCache.filter((x) => x.chatId === chatId) : [];
 }
+function answerEntries(x) {
+  if (Array.isArray(x.answerHistory) && x.answerHistory.length) return x.answerHistory;
+  return x.answer ? [{ t: x.answeredAt || x.t, text: x.answer, messageId: null }] : [];
+}
 
 function showCustomerHistory(chatId) {
   const items = customerQuestions(chatId);
@@ -1148,7 +1160,8 @@ function showCustomerHistory(chatId) {
       <div class="row" style="margin-bottom:6px"><b>السؤال ${items.length - i}</b><span class="${x.status === "answered" ? "status ok" : "status warn"}">${x.status === "answered" ? "✅ تم الإرسال" : "⏳ لم تتم الإجابة"}</span></div>
       <div style="white-space:pre-wrap">${esc(x.q)}</div>
       <div class="muted" style="margin-top:5px">${fmtTime(x.t)}</div>
-      ${x.status === "answered" ? `<div style="margin-top:8px;padding:8px;background:var(--soft);border-radius:8px;white-space:pre-wrap"><b>الإجابة:</b>\n${esc(x.answer || "")}</div>` : ""}
+      ${answerEntries(x).map((a, ai) => `<div style="margin-top:8px;padding:8px;background:var(--soft);border-radius:8px;white-space:pre-wrap"><b>الإجابة ${ai + 1}:</b>\n${esc(a.text || "")}<br><span class="muted">${fmtTime(a.t)}</span><br><button class="ghost" style="margin-top:5px" onclick='editAnswerHistory(${JSON.stringify(x.id)}, ${ai})'>📝 تعديل وإعادة إرسال هذه الإجابة</button></div>`).join("")}
+      ${(x.followups || []).map((f) => `<div style="margin-top:8px;padding:8px;border-right:3px solid var(--accent);white-space:pre-wrap"><b>متابعة العميل:</b>\n${esc(f.text)}<br><span class="muted">${fmtTime(f.t)}</span></div>`).join("")}
     </div>`).join("");
   modal(`<h2 style="margin:0 0 10px">👤 سجل أسئلة العميل</h2>
     <p class="muted">العميل: ${esc(customerName)}<br>عدد الأسئلة المسجلة لهذا العميل: ${items.length}</p>
@@ -1170,7 +1183,7 @@ function renderQuestions() {
   const q = ($("qSearch").value || "").trim();
   const counts = {};
   questionsCache.filter((x) => x.status !== "answered").forEach((x) => { const k = normQ(x.q); counts[k] = (counts[k] || 0) + 1; });
-  const rows = questionsCache.filter((x) => x.status !== "answered" && (!q || x.q.includes(q)));
+  const rows = questionsCache.filter((x) => !["answered", "archived"].includes(x.status) && (!q || x.q.includes(q)));
   if (!rows.length) { t.innerHTML = '<tr><td class="muted">مفيش أسئلة بعد</td></tr>'; return; }
   t.innerHTML = `<tr><th>العميل</th><th>السؤال</th><th>عدد مرات</th><th>الوقت</th><th>الإجابة</th><th></th></tr>` + rows.map((x) => `
     <tr>
@@ -1179,9 +1192,9 @@ function renderQuestions() {
       <td>${counts[normQ(x.q)] > 1 ? `<span class="chip">${counts[normQ(x.q)]}</span>` : "1"}</td>
       <td>${fmtTime(x.t)}</td>
       <td style="min-width:280px">
-        ${x.status === "answered" ? `<div class="status ok">✅ تم الإرسال<br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>💾 حفظ وإرسال التعديل</button></div></div>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
+        ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">المتابعات: ${x.followups?.length || 0}/3<br>${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>💾 حفظ وإرسال التعديل</button></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد (${x.followups?.length || 0}/3)<br><div style="white-space:pre-wrap;margin-top:5px">${esc(x.followups?.at(-1)?.text || "")}</div><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال الرد</button>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
       </td>
-      <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}<button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
+      <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}<button class="ghost" style="margin-bottom:6px" onclick='closeQuestionFromPanel(${JSON.stringify(x.id)})'>🔒 إغلاق</button><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
     </tr>`).join("");
 }
 
@@ -1194,7 +1207,7 @@ async function sendAnswer(id, savedAnswer = "") {
   try {
     const result = await api("answerQuestion", { ref: id, answer });
     const item = questionsCache.find((x) => x.id === id);
-    if (item) { item.answer = answer; item.status = "answered"; item.answeredAt = result.question?.answeredAt || Date.now(); item.raw = result.question?.raw || item.raw; }
+    if (item) { item.answer = answer; item.status = result.question?.status || "awaiting_followup"; item.answeredAt = result.question?.answeredAt || Date.now(); item.followupUntil = result.question?.followupUntil || item.followupUntil; item.answerHistory = result.question?.answerHistory || item.answerHistory; item.raw = result.question?.raw || item.raw; }
     renderQuestions();
     renderArchive();
     toast("تم إرسال الإجابة للعميل", "ok");
@@ -1211,7 +1224,7 @@ function archiveRows() {
   const from = $("aFrom")?.value || "";
   const to = $("aTo")?.value || "";
   return questionsCache.filter((x) => {
-    if (x.status !== "answered") return false;
+    if (!["answered", "archived"].includes(x.status)) return false;
     const day = cairoDate(x.t);
     const text = `${x.q || ""} ${x.answer || ""}`.toLowerCase();
     return (!q || text.includes(q)) && (!from || day >= from) && (!to || day <= to);
@@ -1227,7 +1240,7 @@ function renderArchive() {
     <tr>
       <td>${esc(x.customerName || "غير معروف")}<br>${x.chatId ? `<button class="ghost" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}</td>
       <td style="white-space:pre-wrap">${esc(x.q)}</td>
-      <td style="white-space:pre-wrap">${esc(x.answer || "")}</td>
+      <td style="white-space:pre-wrap">${answerEntries(x).map((a, ai) => `<div style="margin-bottom:6px"><b>${ai + 1}.</b> ${esc(a.text || "")}<br><button class="ghost" onclick='editAnswerHistory(${JSON.stringify(x.id)}, ${ai})'>📝 تعديل</button></div>`).join("")}</td>
       <td>${fmtTime(x.t)}</td>
       <td>${x.answeredAt ? fmtTime(x.answeredAt) : "—"}</td>
       <td><div class="q-actions"><button class="ghost" onclick='editArchiveAnswer(${JSON.stringify(x.id)})'>📝 تعديل/إرسال</button><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑 حذف</button></div></td>
@@ -1259,6 +1272,36 @@ function sendArchiveAnswer(id) {
   sendAnswer(id, answer);
 }
 
+async function editAnswerHistory(id, answerIndex) {
+  const item = questionsCache.find((x) => x.id === id);
+  const entry = item && answerEntries(item)[answerIndex];
+  if (!item || !entry) return;
+  const result = await new Promise((resolve) => {
+    const bg = document.createElement("div");
+    bg.className = "modal-bg";
+    bg.innerHTML = `<div class="modal"><h2 style="margin:0 0 10px">📝 تعديل الإجابة ${answerIndex + 1}</h2>
+      <p class="muted">سيتم إرسال النسخة المعدلة للعميل، وتظل بقية الإجابات كما هي.</p>
+      <textarea id="history-answer-edit" rows="7">${esc(entry.text || "")}</textarea>
+      <div class="row" style="margin-top:12px"><button class="ok" data-r="1">📤 تعديل وإعادة الإرسال</button><button class="ghost" data-r="0">إلغاء</button></div></div>`;
+    bg.addEventListener("click", (e) => {
+      if (e.target.dataset.r !== undefined) {
+        const value = bg.querySelector("#history-answer-edit")?.value || "";
+        bg.remove(); resolve({ ok: e.target.dataset.r === "1", answer: value });
+      } else if (e.target === bg) { bg.remove(); resolve({ ok: false, answer: "" }); }
+    });
+    document.body.appendChild(bg);
+  });
+  if (!result.ok || !result.answer.trim()) return;
+  try {
+    const response = await api("editAnswer", { ref: id, answerIndex, answer: result.answer.trim() });
+    const updated = response.question;
+    const local = questionsCache.find((x) => x.id === id);
+    if (local) Object.assign(local, updated);
+    renderQuestions(); renderArchive();
+    toast("تم تعديل الإجابة وإعادة إرسالها", "ok");
+  } catch (e) { toast(e.message, "bad"); }
+}
+
 async function deleteQ(raw) {
   const ok = await confirmBox("تمسح السؤال ده؟", "حذف", true);
   if (!ok) return;
@@ -1268,6 +1311,18 @@ async function deleteQ(raw) {
     renderQuestions();
     renderArchive();
     toast("اتمسح", "ok");
+  } catch (e) { toast(e.message, "bad"); }
+}
+
+async function closeQuestionFromPanel(id) {
+  const ok = await confirmBox("هيتم إغلاق السؤال وإرسال تنبيه للعميل ونقله للأرشيف. متأكد؟", "إغلاق السؤال", true);
+  if (!ok) return;
+  try {
+    const result = await api("closeQuestion", { ref: id });
+    const item = questionsCache.find((x) => x.id === id);
+    if (item) Object.assign(item, result.question);
+    renderQuestions(); renderArchive();
+    toast("تم إغلاق السؤال ونقله للأرشيف", "ok");
   } catch (e) { toast(e.message, "bad"); }
 }
 
