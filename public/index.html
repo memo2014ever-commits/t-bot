@@ -496,7 +496,8 @@ function openSystemMessages() {
       ["limitReached", "🚫 لما العميل يخلص أسئلته (اكتب {max} للحد)", "بتظهر لما يوصل للحد اليومي", "استنفدت عدد الأسئلة المسموحة ({max}) خلال 24 ساعة 🙏"],
     ]],
     ["🔁 متابعة السؤال والإغلاق", "تتحكم في الرسائل التي تظهر بعد الرد أو عند إغلاق السؤال", [
-      ["answerFooter", "📌 النص أسفل كل إجابة من الإدارة", "يظهر لتوضيح Reply للسؤال نفسه وزر السؤال الجديد؛ اتركه فارغًا للافتراضي", "\n\n━━━━━━━━━━━━\n📌 للمتابعة على نفس السؤال: اضغط Reply / رد على هذه الرسالة واكتب استفسارك.\n🆕 لسؤال جديد: استخدم زر «ابعت سؤالك»."],
+      ["answerFooter", "📌 النص أسفل كل إجابة من الإدارة", "يظهر لتوضيح Reply للسؤال نفسه وزر السؤال الجديد؛ اتركه فارغًا للافتراضي", "\n\n📌 مسموح بحد أقصى 3 متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك»."],
+      ["finalAnswerFooter", "🔒 النص أسفل الرد النهائي", "يظهر بعد الرد على آخر متابعة عند إغلاق السؤال", "\n\n🔒 تم إغلاق السؤال. لأي سؤال جديد استخدم زر «ابعت سؤالك»."],
       ["followupPlaceholder", "✍️ النص داخل خانة Reply", "يظهر في خانة الكتابة عند الرد على إجابة الإدارة", "اكتب متابعة السؤال هنا..."],
       ["followupReceived", "✅ رسالة استلام المتابعة", "تظهر بعد Reply صحيح على إجابة ما زالت مفتوحة", "تم استلام المتابعة على نفس السؤال ✅\nسيتم الرد عليك هنا."],
       ["followupLimit", "🚫 رسالة انتهاء المتابعات", "تظهر بعد تجاوز 3 متابعات لنفس السؤال", "تم الوصول للحد الأقصى للمتابعات على هذا السؤال. لو عندك استفسار جديد، استخدم زر «ابعت سؤالك» 👇"],
@@ -1192,7 +1193,7 @@ function renderQuestions() {
       <td>${counts[normQ(x.q)] > 1 ? `<span class="chip">${counts[normQ(x.q)]}</span>` : "1"}</td>
       <td>${fmtTime(x.t)}</td>
       <td style="min-width:280px">
-        ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">المتابعات: ${x.followups?.length || 0}/3<br>${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>💾 حفظ وإرسال التعديل</button></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد (${x.followups?.length || 0}/3)<br><div style="white-space:pre-wrap;margin-top:5px">${esc(x.followups?.at(-1)?.text || "")}</div><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال الرد</button>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
+        ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>💾 حفظ وإرسال التعديل</button></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد<br><button class="ghost" style="margin-top:6px" onclick='showFollowup(${JSON.stringify(x.id)})'>📩 عرض متابعة العميل</button><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال الرد</button>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
       </td>
       <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}<button class="ghost" style="margin-bottom:6px" onclick='closeQuestionFromPanel(${JSON.stringify(x.id)})'>🔒 إغلاق</button><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
     </tr>`).join("");
@@ -1217,6 +1218,15 @@ async function sendAnswer(id, savedAnswer = "") {
 function toggleAnswer(id) {
   const el = document.getElementById(`answer-edit-${id}`);
   if (el) el.classList.toggle("hidden");
+}
+
+function showFollowup(id) {
+  const item = questionsCache.find((x) => x.id === id);
+  const followup = item?.followups?.at(-1);
+  if (!followup) return;
+  modal(`<h2 style="margin:0 0 10px">📩 متابعة العميل</h2>
+    <div class="card" style="white-space:pre-wrap;padding:12px">${esc(followup.text)}<br><span class="muted">${fmtTime(followup.t)}</span></div>
+    <div class="row" style="margin-top:12px"><button class="ghost" data-r="0">إغلاق</button></div>`);
 }
 
 function archiveRows() {
