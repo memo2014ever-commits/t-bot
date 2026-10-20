@@ -24,6 +24,9 @@ const DEFAULT_FOLLOWUP_RECEIVED = "تم استلام المتابعة على ن�
 const DEFAULT_FOLLOWUP_LIMIT = "تم الوصول للحد الأقصى للمتابعات على هذا السؤال. لو عندك استفسار جديد، استخدم زر «ابعت سؤالك» 👇";
 const DEFAULT_INQUIRY = "للاستعلام عن موعدك أو حجزك، ادخل على بوت الحجز مباشرة 👇";
 const DEFAULT_INQUIRY_WORDS = ["استعلم", "استعلام", "موعدي", "حجزي", "متابعه", "حاله الطلب", "رقم الطلب"];
+const SHORT_REPLIES = new Set([
+  "شكرا", "شكراً", "تمام", "تمام شكرا", "اهلا", "أهلا", "السلام عليكم", "وعليكم السلام", "الو", "الوو", "ok", "اوك", "ماشي",
+].map((w) => norm(w)));
 const DEFAULT_MED_WORDS = ["علاج", "دوا", "دواء", "ادويه", "اعراض", "الم", "وجع", "مرض", "جرعه", "تشخيص", "حساسيه", "حراره"];
 
 const fill = (t, vars) => Object.entries(vars).reduce((a, [k, v]) => a.split("{" + k + "}").join(String(v)), t);
@@ -272,6 +275,41 @@ bot.on("message:text", async (ctx) => {
     return ctx.reply(toHtml(m.inquiry || DEFAULT_INQUIRY), HTML_OPTS(kb));
   }
 
+  // 3) رد على خانة السؤال: أي كلام بيتسجل كسؤال، إلا الكلام القصير جداً أو الشكر والتحية
+  const r = ctx.message.reply_to_message;
+  const rText = (r && r.text) || "";
+  const prompt = m.askPrompt || DEFAULT_PROMPT;
+  const isAskPrompt = rText === prompt || rText.startsWith("اكتب سؤالك") || rText.startsWith("مش واضح إنه سؤال");
+  if (r && r.from?.is_bot && isAskPrompt) {
+    const cleaned = norm(text);
+    if (cleaned.length < 3 || SHORT_REPLIES.has(cleaned)) {
+      return ctx.reply("اكتب سؤالك بشكل أوضح 👇", {
+        reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
+      });
+    }
+    let allowed = true;
+    try { allowed = await questionAllowed(ctx.chat.id); } catch {}
+    if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(root));
+    const customerName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || (ctx.from?.username ? `@${ctx.from.username}` : "");
+    try { await pushQuestion(text, ctx.chat.id, customerName); } catch {}
+    const left = await questionsLeft(ctx.chat.id).catch(() => 0);
+    const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
+    await ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
+    // لو فيه إجابة جاهزة في الزراير، نعرضها بعد الشكر (السؤال اتسجل في كل الحالات)
+    const readyHits = searchNodes(content, text);
+    if (readyHits.length === 1) return showHit(ctx, readyHits[0]);
+    if (readyHits.length > 1) {
+      const kb = new InlineKeyboard();
+      readyHits.forEach((h) => {
+        if (h.node.url) kb.url(h.node.label, h.node.url).row();
+        else kb.text(h.node.label, `n:${h.path}`).row();
+      });
+      const lines = readyHits.map((h) => choiceLine(content, h)).join("\n");
+      return ctx.reply(toHtml((m.didYouMean || DEFAULT_DYM) + "\n\n" + lines), HTML_OPTS(kb));
+    }
+    return;
+  }
+
   // 2) بحث في المحتوى (زراير + استدعاء + نص)، قبل أي فلتر
   const hits = searchNodes(content, text);
   if (hits.length === 1) return showHit(ctx, hits[0]);
@@ -283,29 +321,6 @@ bot.on("message:text", async (ctx) => {
     });
     const lines = hits.map((h) => choiceLine(content, h)).join("\n");
     return ctx.reply(toHtml((m.didYouMean || DEFAULT_DYM) + "\n\n" + lines), HTML_OPTS(kb));
-  }
-
-  // 3) رد على خانة السؤال: يتسجل كسؤال لو اجتاز الفلتر
-  const r = ctx.message.reply_to_message;
-  const rText = (r && r.text) || "";
-  const prompt = m.askPrompt || DEFAULT_PROMPT;
-  const isAskPrompt = rText === prompt || rText.startsWith("اكتب سؤالك") || rText.startsWith("مش واضح إنه سؤال");
-  if (r && r.from?.is_bot && isAskPrompt) {
-    const customWords = Array.isArray(content.questionWords) && content.questionWords.length
-      ? content.questionWords : QUESTION_WORDS;
-    if (!looksLikeQuestion(text, customWords)) {
-      return ctx.reply("مش واضح إنه سؤال، اكتب سؤالك بشكل واضح، مثلاً: ممكن أعرف عنوان لجنة القاهرة؟", {
-        reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
-      });
-    }
-    let allowed = true;
-    try { allowed = await questionAllowed(ctx.chat.id); } catch {}
-    if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(root));
-    const customerName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || (ctx.from?.username ? `@${ctx.from.username}` : "");
-    try { await pushQuestion(text, ctx.chat.id, customerName); } catch {}
-    const left = await questionsLeft(ctx.chat.id).catch(() => 0);
-    const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
-    return ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
   }
 
   // 4) مفيش تطابق: نسجل الكلمات اللي ما اتطابقتش (بدون أرقام)، ورد عام مع القايمة
