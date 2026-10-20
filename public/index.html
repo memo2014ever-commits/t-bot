@@ -1238,7 +1238,8 @@ async function refreshQuestionsSilently() {
     updateBell();
     const tabOpen = !$("tab-questions").classList.contains("hidden");
     // ما نعيدش الرسم وفيه كتابة جارية عشان ما نمسحش الرد اللي بتكتبه
-    const typing = document.activeElement && document.activeElement.tagName === "TEXTAREA";
+    // بنوقف الرسم بس لو فيه رد مكتوب ولسه ما اتبعتش
+    const typing = [...document.querySelectorAll('textarea[id^="answer-"]')].some((t) => t.value.trim() && t.offsetParent);
     if (tabOpen && !typing) { renderQuestions(); renderArchive(); }
   } catch {}
 }
