@@ -67,11 +67,80 @@ export async function getUnmatched() {
 export async function deleteUnmatched(word) { await redis(["HDEL", "unmatched", word]); }
 export async function clearUnmatched() { await redis(["DEL", "unmatched"]); }
 
+// ===== تخزين الأسئلة: كل سؤال ليه مفتاح خاص (ID) في hash، والترتيب في قايمة IDs =====
+const Q_DATA = "qdata";      // hash: id -> JSON السؤال
+const Q_ORDER = "qorder";    // list: IDs من الأحدث للأقدم
+const Q_LEGACY = "questions"; // التخزين القديم (هيتنقل تلقائياً مرة واحدة)
+let qStoreReady = false;
+
+// ينقل الأسئلة القديمة للتخزين الجديد مرة واحدة بس
+async function ensureQuestionStore() {
+  if (qStoreReady) return;
+  const flag = await redis(["GET", "qmigrated"]);
+  if (flag !== "1") {
+    const legacy = (await redis(["LRANGE", Q_LEGACY, 0, -1])) || [];
+    const ids = [];
+    for (const r of legacy) {
+      try {
+        const item = JSON.parse(r);
+        if (!item.id) item.id = randomUUID();
+        await redis(["HSET", Q_DATA, item.id, JSON.stringify(item)]);
+        ids.push(item.id);
+      } catch {}
+    }
+    if (ids.length) await redis(["RPUSH", Q_ORDER, ...ids]);
+    if (legacy.length) await redis(["DEL", Q_LEGACY]);
+    await redis(["SET", "qmigrated", "1"]);
+  }
+  qStoreReady = true;
+}
+
+// يرجّع المعرّف من أي مرجع (ID أو النص القديم JSON)
+function idFromRef(ref) {
+  if (typeof ref !== "string") return null;
+  try { const j = JSON.parse(ref); return j.id || null; } catch { return ref; }
+}
+
+async function loadQuestions(limit = 500) {
+  await ensureQuestionStore();
+  const ids = (await redis(["LRANGE", Q_ORDER, 0, limit - 1])) || [];
+  if (!ids.length) return [];
+  const vals = (await redis(["HMGET", Q_DATA, ...ids])) || [];
+  const out = [];
+  ids.forEach((id, i) => {
+    try { if (vals[i]) out.push(JSON.parse(vals[i])); } catch {}
+  });
+  return out;
+}
+
+async function getQuestionById(id) {
+  if (!id) return null;
+  await ensureQuestionStore();
+  const v = await redis(["HGET", Q_DATA, id]);
+  if (!v) return null;
+  try { return JSON.parse(v); } catch { return null; }
+}
+
+async function saveQuestion(item) {
+  await redis(["HSET", Q_DATA, item.id, JSON.stringify(item)]);
+  return { ...item, raw: JSON.stringify(item) };
+}
+
 export async function pushQuestion(text, chatId, customerName = "") {
-  await redis(["LPUSH", "questions", JSON.stringify({
-    id: randomUUID(), t: Date.now(), q: String(text).slice(0, 500), chatId: String(chatId), customerName: String(customerName).slice(0, 150), status: "open",
-  })]);
-  if (Math.random() < 0.05) await redis(["LTRIM", "questions", 0, 499]);
+  await ensureQuestionStore();
+  const item = {
+    id: randomUUID(), t: Date.now(), q: String(text).slice(0, 500),
+    chatId: String(chatId), customerName: String(customerName).slice(0, 150), status: "open",
+  };
+  await redis(["HSET", Q_DATA, item.id, JSON.stringify(item)]);
+  await redis(["LPUSH", Q_ORDER, item.id]);
+  if (Math.random() < 0.05) {
+    const extra = (await redis(["LRANGE", Q_ORDER, 500, -1])) || [];
+    if (extra.length) {
+      await redis(["LTRIM", Q_ORDER, 0, 499]);
+      await redis(["HDEL", Q_DATA, ...extra]);
+    }
+  }
 }
 
 const MAX_QUESTIONS = 3;
@@ -89,90 +158,78 @@ export async function questionAllowed(chatId) {
 export const MAX_QUESTIONS_COUNT = MAX_QUESTIONS;
 
 export async function getQuestions() {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
-  return raw.map((r) => ({ raw: r, ...JSON.parse(r) }));
+  const items = await loadQuestions();
+  return items.map((it) => ({ raw: JSON.stringify(it), ...it }));
 }
-export async function deleteQuestion(raw) { await redis(["LREM", "questions", 1, raw]); }
+
+export async function deleteQuestion(ref) {
+  const id = idFromRef(ref);
+  if (!id) return;
+  await ensureQuestionStore();
+  await redis(["HDEL", Q_DATA, id]);
+  await redis(["LREM", Q_ORDER, 1, id]);
+}
 
 export const FOLLOWUP_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const MAX_FOLLOWUPS = 3;
 
+// الإغلاق التلقائي: بيشوف الأسئلة اللي مهلة المتابعة بتاعتها خلصت
 export async function closeExpiredQuestions(now = Date.now()) {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const items = await loadQuestions();
   const closed = [];
-  for (let i = 0; i < raw.length; i++) {
-    try {
-      const item = JSON.parse(raw[i]);
-      if (item.status === "awaiting_followup" && item.followupUntil && item.followupUntil <= now) {
-        const updated = { ...item, status: "archived", closedAt: now, closeReason: "timeout" };
-        await redis(["LSET", "questions", i, JSON.stringify(updated)]);
-        closed.push({ ...updated, raw: JSON.stringify(updated) });
-      }
-    } catch {}
+  for (const item of items) {
+    if (item.status === "awaiting_followup" && item.followupUntil && item.followupUntil <= now) {
+      const updated = { ...item, status: "archived", closedAt: now, closeReason: "timeout" };
+      closed.push(await saveQuestion(updated));
+    }
   }
   return closed;
 }
 
+// يشتغل مرة كل ساعة بس (قفل بالوقت) عشان ما يستهلكش أوامر مع كل رسالة
+export async function maybeExpireQuestions(now = Date.now()) {
+  const ok = await redis(["SET", "expiry:lock", "1", "NX", "EX", 3600]);
+  if (ok !== "OK") return [];
+  return closeExpiredQuestions(now);
+}
+
 export async function closeQuestion(ref, reason = "manual") {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
-  const index = raw.findIndex((r) => {
-    try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
-  });
-  if (index < 0) return null;
-  const item = JSON.parse(raw[index]);
-  if (item.status === "archived") return { ...item, raw: raw[index] };
-  const updated = { ...item, status: "archived", closedAt: Date.now(), closeReason: reason };
-  const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
-  return result === null ? null : { ...updated, raw: JSON.stringify(updated) };
+  const item = await getQuestionById(idFromRef(ref));
+  if (!item) return null;
+  if (item.status === "archived") return { ...item, raw: JSON.stringify(item) };
+  return saveQuestion({ ...item, status: "archived", closedAt: Date.now(), closeReason: reason });
 }
 
 export async function questionForReply(chatId, messageId, now = Date.now()) {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
-  for (let i = 0; i < raw.length; i++) {
-    try {
-      const item = JSON.parse(raw[i]);
-      if (String(item.chatId) !== String(chatId) || item.status !== "awaiting_followup" || !item.followupUntil || item.followupUntil <= now) continue;
-      if ((item.answerMessageIds || []).map(Number).includes(Number(messageId))) return { ...item, raw: raw[i], index: i };
-    } catch {}
+  const items = await loadQuestions();
+  for (const item of items) {
+    if (String(item.chatId) !== String(chatId) || item.status !== "awaiting_followup" || !item.followupUntil || item.followupUntil <= now) continue;
+    if ((item.answerMessageIds || []).map(Number).includes(Number(messageId))) return { ...item, raw: JSON.stringify(item) };
   }
   return null;
 }
 
 export async function addFollowup(ref, text, now = Date.now()) {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
-  const index = raw.findIndex((r) => {
-    try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
-  });
-  if (index < 0) return null;
-  const item = JSON.parse(raw[index]);
+  const item = await getQuestionById(idFromRef(ref));
+  if (!item) return null;
   const followups = Array.isArray(item.followups) ? item.followups : [];
-  if (followups.length >= MAX_FOLLOWUPS) return { ...item, raw: raw[index], limitReached: true };
-  const updated = {
+  if (followups.length >= MAX_FOLLOWUPS) return { ...item, raw: JSON.stringify(item), limitReached: true };
+  return saveQuestion({
     ...item,
     status: "followup_pending",
     lastActivityAt: now,
     followups: [...followups, { t: now, text: String(text).slice(0, 1000) }],
-  };
-  const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
-  return result === null ? null : { ...updated, raw: JSON.stringify(updated) };
+  });
 }
 
 export async function answerQuestion(ref, answer, telegramMessageId = null) {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
-  const index = raw.findIndex((r) => {
-    try {
-      const item = JSON.parse(r);
-      return item.id === ref || r === ref;
-    } catch { return r === ref; }
-  });
-  if (index < 0) return null;
-
-  const item = JSON.parse(raw[index]);
+  const item = await getQuestionById(idFromRef(ref));
+  if (!item) return null;
   if (!item.chatId) return { error: "السؤال قديم ولا يحتوي على معرّف العميل" };
   const now = Date.now();
   const followupCount = Array.isArray(item.followups) ? item.followups.length : 0;
   const closesNow = followupCount >= MAX_FOLLOWUPS;
-  const updated = {
+  return saveQuestion({
     ...item,
     answer: String(answer).slice(0, 3500),
     status: closesNow ? "archived" : "awaiting_followup",
@@ -183,26 +240,19 @@ export async function answerQuestion(ref, answer, telegramMessageId = null) {
     closeReason: closesNow ? "max_followups" : item.closeReason,
     answerMessageIds: [...(item.answerMessageIds || []), ...(telegramMessageId ? [Number(telegramMessageId)] : [])].slice(-10),
     answerHistory: [...(item.answerHistory || []), { t: now, text: String(answer).slice(0, 3500), messageId: telegramMessageId ? Number(telegramMessageId) : null }].slice(-10),
-  };
-  const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
-  if (result === null) return null;
-  return { ...updated, raw: JSON.stringify(updated) };
+  });
 }
 
 export async function updateAnswerHistory(ref, historyIndex, answer, telegramMessageId = null) {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
-  const index = raw.findIndex((r) => {
-    try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
-  });
-  if (index < 0) return null;
-  const item = JSON.parse(raw[index]);
+  const item = await getQuestionById(idFromRef(ref));
+  if (!item) return null;
   const history = Array.isArray(item.answerHistory) && item.answerHistory.length
     ? [...item.answerHistory]
     : (item.answer ? [{ t: item.answeredAt || item.t || Date.now(), text: item.answer, messageId: null }] : []);
   if (!Number.isInteger(historyIndex) || historyIndex < 0 || historyIndex >= history.length) return { error: "الإجابة غير موجودة" };
   const now = Date.now();
   history[historyIndex] = { ...history[historyIndex], text: String(answer).slice(0, 3500), editedAt: now, messageId: telegramMessageId ? Number(telegramMessageId) : history[historyIndex].messageId };
-  const updated = {
+  return saveQuestion({
     ...item,
     answer: history[history.length - 1]?.text || item.answer || "",
     answerHistory: history,
@@ -211,9 +261,7 @@ export async function updateAnswerHistory(ref, historyIndex, answer, telegramMes
     followupUntil: now + FOLLOWUP_WINDOW_MS,
     status: item.status === "archived" ? "archived" : "awaiting_followup",
     answerMessageIds: [...(item.answerMessageIds || []), ...(telegramMessageId ? [Number(telegramMessageId)] : [])].slice(-10),
-  };
-  const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
-  return result === null ? null : { ...updated, raw: JSON.stringify(updated) };
+  });
 }
 
 // لا يوجد قص للسجل؛ يعرض كل السجل التاريخي المتاح.

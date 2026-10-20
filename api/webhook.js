@@ -1,7 +1,7 @@
 // بوت تلجرام: قايمة + رجوع + روابط + زرار سؤال + بحث بالكلمات + تحويل الطبي للخط الساخن
 import { Bot, InlineKeyboard, webhookCallback } from "grammy";
 import {
-  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, questionForReply, addFollowup, closeExpiredQuestions,
+  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, questionForReply, addFollowup, maybeExpireQuestions,
 } from "./stats.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
@@ -235,7 +235,7 @@ bot.on("message:text", async (ctx) => {
   try { await trackActive(ctx.chat.id); } catch {}
   const content = await getContent().catch(() => ({}));
   const m = content.messages || {};
-  try { await notifyExpired(await closeExpiredQuestions(), m.autoClosed || DEFAULT_CLOSED_AUTO); } catch {}
+  try { await notifyExpired(await maybeExpireQuestions(), m.autoClosed || DEFAULT_CLOSED_AUTO); } catch {}
   const text = ctx.message.text || "";
   const root = render(content, "").markup;
 
