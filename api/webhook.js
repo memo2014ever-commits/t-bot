@@ -84,6 +84,9 @@ function searchNodes(content, text) {
     const kws = [...new Set([node.label, ...(Array.isArray(node.keywords) ? node.keywords : [])]
       .map(norm).filter((k) => k.length >= 2))];
     const nameScore = kws.filter((k) => t.includes(" " + k + " ")).length * 2;
+    // الكلمة المفردة جوه أي عبارة (زي "الاوراق" جوه "الاوراق المطلوبة")
+    const kwTokens = new Set(kws.flatMap((k) => k.split(" ")).filter((x) => x.length >= 3 && !COMMON.has(x)));
+    const tokenScore = qt.filter((tok) => kwTokens.has(tok)).length;
 
     let snippet = "";
     let textScore = 0;
@@ -92,9 +95,9 @@ function searchNodes(content, text) {
       const line = lines.find((l) => norm(l).split(" ").includes(tok));
       if (line) { textScore++; if (!snippet) snippet = line.trim(); }
     }
-    const score = nameScore + textScore;
+    const score = nameScore + tokenScore + textScore;
     if (score > 0) {
-      hits.push({ path, node, score, matchedIn: nameScore > 0 ? "name" : "text", snippet });
+      hits.push({ path, node, score, matchedIn: nameScore + tokenScore > 0 ? "name" : "text", snippet });
     }
   }
   return hits.sort((x, y) => y.score - x.score).slice(0, 5);
