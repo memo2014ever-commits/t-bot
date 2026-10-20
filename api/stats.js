@@ -126,6 +126,20 @@ async function saveQuestion(item) {
   return { ...item, raw: JSON.stringify(item) };
 }
 
+// سؤال معلّق مؤقتاً (10 دقايق) لحد ما العميل يختار من "تقصد؟" أو يأكد إنه يبعته
+function pendKey(chatId) {
+  return "pend:" + createHash("sha256").update(String(chatId)).digest("hex").slice(0, 16);
+}
+export async function setPending(chatId, text) {
+  await redis(["SET", pendKey(chatId), String(text).slice(0, 500), "EX", 600]);
+}
+export async function takePending(chatId) {
+  const k = pendKey(chatId);
+  const v = await redis(["GET", k]);
+  if (v) await redis(["DEL", k]);
+  return v;
+}
+
 export async function pushQuestion(text, chatId, customerName = "") {
   await ensureQuestionStore();
   const item = {

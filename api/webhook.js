@@ -1,7 +1,7 @@
 // بوت تلجرام: قايمة + رجوع + روابط + زرار سؤال + بحث بالكلمات + تحويل الطبي للخط الساخن
 import { Bot, InlineKeyboard, webhookCallback } from "grammy";
 import {
-  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, questionForReply, addFollowup, maybeExpireQuestions,
+  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, questionForReply, addFollowup, maybeExpireQuestions, setPending, takePending,
 } from "./stats.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
@@ -170,6 +170,28 @@ bot.callbackQuery(/^n:(.*)$/, (ctx) => showNode(ctx, ctx.match[1], true));
 bot.callbackQuery(/^b:(.*)$/, (ctx) => showNode(ctx, ctx.match[1], false));
 bot.callbackQuery("home", (ctx) => showNode(ctx, "", false));
 
+// العميل قال "ده مش قصدي": نسجل السؤال المعلّق
+bot.callbackQuery("pq", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  let text = null;
+  try { text = await takePending(ctx.chat.id); } catch {}
+  if (!text) return ctx.reply("انتهت المهلة، اكتب سؤالك تاني 👇", {
+    reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
+  });
+  let allowed = true;
+  try { allowed = await questionAllowed(ctx.chat.id); } catch {}
+  if (!allowed) {
+    const content = await getContent().catch(() => ({}));
+    return ctx.reply(fill((content.messages || {}).limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(render(content, "").markup));
+  }
+  const customerName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || (ctx.from?.username ? `@${ctx.from.username}` : "");
+  try { await pushQuestion(text, ctx.chat.id, customerName); } catch {}
+  const content = await getContent().catch(() => ({}));
+  const left = await questionsLeft(ctx.chat.id).catch(() => 0);
+  const tail = left > 0 ? "\n" + fill((content.messages || {}).remaining || DEFAULT_LEFT, { left }) : "";
+  return ctx.reply(toHtml(((content.messages || {}).askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(render(content, "").markup));
+});
+
 // زرار "ابعت سؤالك"
 bot.callbackQuery(/^ask:(.*)$/, async (ctx) => {
   const path = ctx.match[1];
@@ -264,12 +286,15 @@ bot.on("message:text", async (ctx) => {
     const readyHits = searchNodes(content, text);
     if (readyHits.length === 1) return showHit(ctx, readyHits[0]);
     if (readyHits.length > 1) {
+      // أكتر من اختيار: نعرض "تقصد؟" ومعاها بديل لو ده مش قصده
+      try { await setPending(ctx.chat.id, text); } catch {}
       const kb = new InlineKeyboard();
-      readyHits.forEach((h) => {
+      readyHits.slice(0, 4).forEach((h) => {
         if (h.node.url) kb.url(h.node.label, h.node.url).row();
         else kb.text(h.node.label, `n:${h.path}`).row();
       });
-      const lines = readyHits.map((h) => choiceLine(content, h)).join("\n");
+      kb.text("📝 لا، ده مش قصدي، ابعت سؤالي", "pq").row();
+      const lines = readyHits.slice(0, 4).map((h) => choiceLine(content, h)).join("\n");
       return ctx.reply(toHtml((m.didYouMean || DEFAULT_DYM) + "\n\n" + lines), HTML_OPTS(kb));
     }
     // مفيش إجابة في البوت: نسجل السؤال ونشكر العميل
