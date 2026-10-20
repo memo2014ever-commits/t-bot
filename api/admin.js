@@ -204,6 +204,12 @@ export default async function handler(req, res) {
     if (action === "save") {
       const err = validate(content);
       if (err) return res.status(400).json({ error: err });
+      if (content.quickReplies !== undefined) {
+        if (!Array.isArray(content.quickReplies) || content.quickReplies.length > 50 ||
+            content.quickReplies.some((q) => !q || typeof q.title !== "string" || q.title.length > 60 || typeof q.text !== "string" || q.text.length > 1000)) {
+          return res.status(400).json({ error: "الإجابات السريعة لازم تكون 50 إجابة كحد أقصى، والعنوان 60 حرف، والنص 1000 حرف" });
+        }
+      }
       if (content.inquiryKeywords !== undefined) {
         if (!Array.isArray(content.inquiryKeywords) || content.inquiryKeywords.length > 100 ||
             content.inquiryKeywords.some((w) => typeof w !== "string" || w.length > 40)) {

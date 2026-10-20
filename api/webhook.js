@@ -126,33 +126,6 @@ function toHtml(text = "") {
     `<a href="${url}">${label}</a>`);
 }
 
-// فلتر السؤال: كلمة من قايمة كلمات السؤال (من اللوحة أو الافتراضية)
-const QUESTION_WORDS = [
-  "ازاي", "إزاي", "امتى", "إمتى", "فين", "ايه", "إيه", "اي", "ايوه", "هل", "كام", "كم",
-  "ممكن", "عايز", "عاوز", "عايزة", "عاوزه", "محتاج", "محتاجة", "لو سمحت", "مين", "ليه", "علشان", "عشان",
-  "عنوان", "موعد", "مواعيد", "سعر", "تكلفة", "فيه", "فيها", "متاح", "متاحة", "بيفتح", "بيقفل", "بيشتغل",
-  "ينفع", "لازم", "المستندات", "مستندات", "أعرف", "اعرف", "قولي", "ابعتلي", "احجز", "أحجز",
-  "اقرب", "أقرب", "لجنة", "لجان", "الكشف", "كشف", "نتيجة", "طلب", "تأجيل", "الغاء", "إلغاء", "تعديل",
-];
-function looksLikeQuestion(text = "", words = QUESTION_WORDS) {
-  if (norm(text).length < 4) return false;
-  const t = padded(text);
-  return words.some((w) => t.includes(" " + norm(w) + " "));
-}
-
-// اسم الزرار الأب لأي مسار (عشان "تقصد؟" توضح المكان)
-function parentLabelOf(content, path) {
-  if (!path.includes(".")) return "";
-  const parent = getNode(content, path.slice(0, path.lastIndexOf(".")));
-  return parent?.label || "";
-}
-
-// يحوّل نص الاختيار: اسم البند + المكان بين قوسين
-function choiceLine(content, hit) {
-  const where = parentLabelOf(content, hit.path);
-  return where ? `• ${hit.node.label} (${where})` : `• ${hit.node.label}`;
-}
-
 function render(node, path) {
   const kb = new InlineKeyboard();
   (node.items || []).forEach((item, i) => {
@@ -275,7 +248,7 @@ bot.on("message:text", async (ctx) => {
     return ctx.reply(toHtml(m.inquiry || DEFAULT_INQUIRY), HTML_OPTS(kb));
   }
 
-  // 3) رد على خانة السؤال: أي كلام بيتسجل كسؤال، إلا الكلام القصير جداً أو الشكر والتحية
+  // 3) رد على خانة السؤال
   const r = ctx.message.reply_to_message;
   const rText = (r && r.text) || "";
   const prompt = m.askPrompt || DEFAULT_PROMPT;
@@ -287,15 +260,7 @@ bot.on("message:text", async (ctx) => {
         reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
       });
     }
-    let allowed = true;
-    try { allowed = await questionAllowed(ctx.chat.id); } catch {}
-    if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(root));
-    const customerName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || (ctx.from?.username ? `@${ctx.from.username}` : "");
-    try { await pushQuestion(text, ctx.chat.id, customerName); } catch {}
-    const left = await questionsLeft(ctx.chat.id).catch(() => 0);
-    const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
-    await ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
-    // لو فيه إجابة جاهزة في الزراير، نعرضها بعد الشكر (السؤال اتسجل في كل الحالات)
+    // لو الإجابة موجودة في محتوى البوت: نرد بيها، ومانسجلش سؤال
     const readyHits = searchNodes(content, text);
     if (readyHits.length === 1) return showHit(ctx, readyHits[0]);
     if (readyHits.length > 1) {
@@ -307,7 +272,15 @@ bot.on("message:text", async (ctx) => {
       const lines = readyHits.map((h) => choiceLine(content, h)).join("\n");
       return ctx.reply(toHtml((m.didYouMean || DEFAULT_DYM) + "\n\n" + lines), HTML_OPTS(kb));
     }
-    return;
+    // مفيش إجابة في البوت: نسجل السؤال ونشكر العميل
+    let allowed = true;
+    try { allowed = await questionAllowed(ctx.chat.id); } catch {}
+    if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(root));
+    const customerName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || (ctx.from?.username ? `@${ctx.from.username}` : "");
+    try { await pushQuestion(text, ctx.chat.id, customerName); } catch {}
+    const left = await questionsLeft(ctx.chat.id).catch(() => 0);
+    const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
+    return ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
   }
 
   // 2) بحث في المحتوى (زراير + استدعاء + نص)، قبل أي فلتر
