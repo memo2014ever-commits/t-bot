@@ -228,11 +228,6 @@ export default async function handler(req, res) {
           if (typeof v !== "string" || v.length > 500) return res.status(400).json({ error: "رسالة نظام طويلة أو غلط (الحد 500 حرف)" });
         }
       }
-      if (content.quickReplies !== undefined) {
-        if (!Array.isArray(content.quickReplies) || content.quickReplies.length > 50 || content.quickReplies.some((x) => !x || typeof x.title !== "string" || typeof x.text !== "string" || !x.title.trim() || !x.text.trim() || x.title.length > 80 || x.text.length > 3500)) {
-          return res.status(400).json({ error: "الإجابات السريعة غير صحيحة (حتى 50 إجابة)" });
-        }
-      }
 
       const cur = await readCurrent();
       // المحرر ما يقدرش يحذف: لو عدد الزراير قل، نرفض

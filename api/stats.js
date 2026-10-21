@@ -67,45 +67,11 @@ export async function getUnmatched() {
 export async function deleteUnmatched(word) { await redis(["HDEL", "unmatched", word]); }
 export async function clearUnmatched() { await redis(["DEL", "unmatched"]); }
 
-const Q_LIST = "questions:list";
-const Q_HASH = "questions:data";
-const Q_MIGRATED = "questions:migrated:v1";
-
-async function ensureQuestionStore() {
-  if (!URL_R || !TOKEN_R) return;
-  if (await redis(["GET", Q_MIGRATED])) return;
-  const locked = await redis(["SET", "questions:migration:lock", "1", "NX", "EX", "60"]);
-  if (locked !== "OK") return;
-  try {
-    if (await redis(["GET", Q_MIGRATED])) return;
-    const old = (await redis(["LRANGE", "questions", 0, -1])) || [];
-    for (const raw of old) {
-      try {
-        const item = JSON.parse(raw);
-        if (!item.id) item.id = createHash("sha256").update(raw).digest("hex").slice(0, 24);
-        await redis(["HSET", Q_HASH, item.id, JSON.stringify(item)]);
-        await redis(["RPUSH", Q_LIST, item.id]);
-      } catch {}
-    }
-    await redis(["SET", Q_MIGRATED, String(Date.now())]);
-  } finally {
-    await redis(["DEL", "questions:migration:lock"]);
-  }
-}
-
-async function questionAt(id) {
-  await ensureQuestionStore();
-  const raw = await redis(["HGET", Q_HASH, String(id)]);
-  if (!raw) return null;
-  try { return { raw, ...JSON.parse(raw) }; } catch { return null; }
-}
-async function saveQuestion(item) { return await redis(["HSET", Q_HASH, String(item.id), JSON.stringify(item)]); }
-
 export async function pushQuestion(text, chatId, customerName = "") {
-  await ensureQuestionStore();
-  const item = { id: randomUUID(), t: Date.now(), q: String(text).slice(0, 500), chatId: String(chatId), customerName: String(customerName).slice(0, 150), status: "open" };
-  await Promise.all([saveQuestion(item), redis(["LPUSH", Q_LIST, item.id])]);
-  return item;
+  await redis(["LPUSH", "questions", JSON.stringify({
+    id: randomUUID(), t: Date.now(), q: String(text).slice(0, 500), chatId: String(chatId), customerName: String(customerName).slice(0, 150), status: "open",
+  })]);
+  if (Math.random() < 0.05) await redis(["LTRIM", "questions", 0, 499]);
 }
 
 const MAX_QUESTIONS = 3;
@@ -123,37 +89,24 @@ export async function questionAllowed(chatId) {
 export const MAX_QUESTIONS_COUNT = MAX_QUESTIONS;
 
 export async function getQuestions() {
-  await ensureQuestionStore();
-  const ids = (await redis(["LRANGE", Q_LIST, 0, 499])) || [];
-  const out = [];
-  for (const id of ids) { const item = await questionAt(id); if (item) out.push(item); }
-  return out;
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  return raw.map((r) => ({ raw: r, ...JSON.parse(r) }));
 }
-export async function deleteQuestion(ref) {
-  const item = await questionAt(ref);
-  if (!item) return;
-  await Promise.all([redis(["LREM", Q_LIST, 1, item.id]), redis(["HDEL", Q_HASH, item.id])]);
-}
+export async function deleteQuestion(raw) { await redis(["LREM", "questions", 1, raw]); }
 
 export const FOLLOWUP_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const MAX_FOLLOWUPS = 3;
 
 export async function closeExpiredQuestions(now = Date.now()) {
-  await ensureQuestionStore();
-  const last = Number((await redis(["GET", "questions:close:last"])) || 0);
-  if (last && now - last < 60 * 60 * 1000) return [];
-  const locked = await redis(["SET", "questions:close:lock", String(now), "NX", "EX", "120"]);
-  if (locked !== "OK") return [];
-  await redis(["SET", "questions:close:last", String(now)]);
-  const ids = (await redis(["LRANGE", Q_LIST, 0, -1])) || [];
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
   const closed = [];
-  for (const id of ids) {
+  for (let i = 0; i < raw.length; i++) {
     try {
-      const item = await questionAt(id);
-      if (item && item.status === "awaiting_followup" && item.followupUntil && item.followupUntil <= now) {
+      const item = JSON.parse(raw[i]);
+      if (item.status === "awaiting_followup" && item.followupUntil && item.followupUntil <= now) {
         const updated = { ...item, status: "archived", closedAt: now, closeReason: "timeout" };
-        await saveQuestion(updated);
-        closed.push(updated);
+        await redis(["LSET", "questions", i, JSON.stringify(updated)]);
+        closed.push({ ...updated, raw: JSON.stringify(updated) });
       }
     } catch {}
   }
@@ -161,74 +114,105 @@ export async function closeExpiredQuestions(now = Date.now()) {
 }
 
 export async function closeQuestion(ref, reason = "manual") {
-  const item = await questionAt(ref);
-  if (!item) return null;
-  if (item.status === "archived") return item;
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const index = raw.findIndex((r) => {
+    try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
+  });
+  if (index < 0) return null;
+  const item = JSON.parse(raw[index]);
+  if (item.status === "archived") return { ...item, raw: raw[index] };
   const updated = { ...item, status: "archived", closedAt: Date.now(), closeReason: reason };
-  const result = await saveQuestion(updated);
+  const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
   return result === null ? null : { ...updated, raw: JSON.stringify(updated) };
 }
 
-export async function saveAmbiguous(chatId, text) {
-  const token = randomUUID().replace(/-/g, "");
-  const key = createHash("sha256").update(token).digest("hex").slice(0, 32);
-  await redis(["SET", `ambiguous:${key}`, JSON.stringify({ chatId: String(chatId), text: String(text).slice(0, 500) }), "EX", "600"]);
-  return token;
-}
-export async function consumeAmbiguous(chatId, token) {
-  const key = createHash("sha256").update(String(token)).digest("hex").slice(0, 32);
-  const raw = await redis(["GET", `ambiguous:${key}`]);
-  if (!raw) return null;
-  await redis(["DEL", `ambiguous:${key}`]);
-  try { const item = JSON.parse(raw); return String(item.chatId) === String(chatId) ? item : null; } catch { return null; }
-}
-
 export async function questionForReply(chatId, messageId, now = Date.now()) {
-  const items = await getQuestions();
-  for (const item of items) {
-    if (String(item.chatId) !== String(chatId) || item.status !== "awaiting_followup" || !item.followupUntil || item.followupUntil <= now) continue;
-    if ((item.answerMessageIds || []).map(Number).includes(Number(messageId))) return item;
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  for (let i = 0; i < raw.length; i++) {
+    try {
+      const item = JSON.parse(raw[i]);
+      if (String(item.chatId) !== String(chatId) || item.status !== "awaiting_followup" || !item.followupUntil || item.followupUntil <= now) continue;
+      if ((item.answerMessageIds || []).map(Number).includes(Number(messageId))) return { ...item, raw: raw[i], index: i };
+    } catch {}
   }
   return null;
 }
 
 export async function addFollowup(ref, text, now = Date.now()) {
-  const item = await questionAt(ref);
-  if (!item) return null;
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const index = raw.findIndex((r) => {
+    try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
+  });
+  if (index < 0) return null;
+  const item = JSON.parse(raw[index]);
   const followups = Array.isArray(item.followups) ? item.followups : [];
-  if (followups.length >= MAX_FOLLOWUPS) return { ...item, limitReached: true };
-  const updated = { ...item, status: "followup_pending", lastActivityAt: now, followups: [...followups, { t: now, text: String(text).slice(0, 1000) }] };
-  const result = await saveQuestion(updated);
+  if (followups.length >= MAX_FOLLOWUPS) return { ...item, raw: raw[index], limitReached: true };
+  const updated = {
+    ...item,
+    status: "followup_pending",
+    lastActivityAt: now,
+    followups: [...followups, { t: now, text: String(text).slice(0, 1000) }],
+  };
+  const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
   return result === null ? null : { ...updated, raw: JSON.stringify(updated) };
 }
 
 export async function answerQuestion(ref, answer, telegramMessageId = null) {
-  const item = await questionAt(ref);
-  if (!item) return null;
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const index = raw.findIndex((r) => {
+    try {
+      const item = JSON.parse(r);
+      return item.id === ref || r === ref;
+    } catch { return r === ref; }
+  });
+  if (index < 0) return null;
+
+  const item = JSON.parse(raw[index]);
   if (!item.chatId) return { error: "السؤال قديم ولا يحتوي على معرّف العميل" };
   const now = Date.now();
   const followupCount = Array.isArray(item.followups) ? item.followups.length : 0;
   const closesNow = followupCount >= MAX_FOLLOWUPS;
   const updated = {
-    ...item, answer: String(answer).slice(0, 3500), status: closesNow ? "archived" : "awaiting_followup", answeredAt: now,
-    lastActivityAt: now, followupUntil: closesNow ? null : now + FOLLOWUP_WINDOW_MS,
-    closedAt: closesNow ? now : item.closedAt, closeReason: closesNow ? "max_followups" : item.closeReason,
+    ...item,
+    answer: String(answer).slice(0, 3500),
+    status: closesNow ? "archived" : "awaiting_followup",
+    answeredAt: now,
+    lastActivityAt: now,
+    followupUntil: closesNow ? null : now + FOLLOWUP_WINDOW_MS,
+    closedAt: closesNow ? now : item.closedAt,
+    closeReason: closesNow ? "max_followups" : item.closeReason,
     answerMessageIds: [...(item.answerMessageIds || []), ...(telegramMessageId ? [Number(telegramMessageId)] : [])].slice(-10),
     answerHistory: [...(item.answerHistory || []), { t: now, text: String(answer).slice(0, 3500), messageId: telegramMessageId ? Number(telegramMessageId) : null }].slice(-10),
   };
-  const result = await saveQuestion(updated);
-  return result === null ? null : { ...updated, raw: JSON.stringify(updated) };
+  const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
+  if (result === null) return null;
+  return { ...updated, raw: JSON.stringify(updated) };
 }
 
 export async function updateAnswerHistory(ref, historyIndex, answer, telegramMessageId = null) {
-  const item = await questionAt(ref);
-  if (!item) return null;
-  const history = Array.isArray(item.answerHistory) && item.answerHistory.length ? [...item.answerHistory] : (item.answer ? [{ t: item.answeredAt || item.t || Date.now(), text: item.answer, messageId: null }] : []);
+  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const index = raw.findIndex((r) => {
+    try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
+  });
+  if (index < 0) return null;
+  const item = JSON.parse(raw[index]);
+  const history = Array.isArray(item.answerHistory) && item.answerHistory.length
+    ? [...item.answerHistory]
+    : (item.answer ? [{ t: item.answeredAt || item.t || Date.now(), text: item.answer, messageId: null }] : []);
   if (!Number.isInteger(historyIndex) || historyIndex < 0 || historyIndex >= history.length) return { error: "الإجابة غير موجودة" };
   const now = Date.now();
   history[historyIndex] = { ...history[historyIndex], text: String(answer).slice(0, 3500), editedAt: now, messageId: telegramMessageId ? Number(telegramMessageId) : history[historyIndex].messageId };
-  const updated = { ...item, answer: history[history.length - 1]?.text || item.answer || "", answerHistory: history, answeredAt: now, lastActivityAt: now, followupUntil: item.status === "archived" ? null : now + FOLLOWUP_WINDOW_MS, status: item.status === "archived" ? "archived" : "awaiting_followup", answerMessageIds: [...(item.answerMessageIds || []), ...(telegramMessageId ? [Number(telegramMessageId)] : [])].slice(-10) };
-  const result = await saveQuestion(updated);
+  const updated = {
+    ...item,
+    answer: history[history.length - 1]?.text || item.answer || "",
+    answerHistory: history,
+    answeredAt: now,
+    lastActivityAt: now,
+    followupUntil: now + FOLLOWUP_WINDOW_MS,
+    status: item.status === "archived" ? "archived" : "awaiting_followup",
+    answerMessageIds: [...(item.answerMessageIds || []), ...(telegramMessageId ? [Number(telegramMessageId)] : [])].slice(-10),
+  };
+  const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
   return result === null ? null : { ...updated, raw: JSON.stringify(updated) };
 }
 
