@@ -133,6 +133,7 @@
 </div>
   <div class="row" style="justify-content:flex-end">
     <span id="who" class="sub hidden"></span>
+    <button class="ghost hidden" id="bellBtn" onclick="openQuestionsFromBell()" title="أسئلة مستنية ردك">🔔 <span id="bellCount" style="font-weight:700"></span></button>
     <button class="ghost" id="themeBtn" onclick="toggleTheme()">🌙</button>
     <button class="ghost hidden" id="logoutBtn" onclick="logout()">خروج</button>
   </div>
@@ -209,11 +210,11 @@
           <button class="ghost" onclick="exportQuestions()">📥 تصدير</button>
         </div>
       </div>
-      <div class="card" id="qWordsCard">
-        <h2>🧠 كلمات التعرف على السؤال</h2>
-        <p class="muted" style="margin-top:-6px">أي رسالة فيها واحدة من الكلمات دي بتتعتبر سؤال. افصل بينهم بفاصلة أو سطر جديد. سيب الخانة فاضية عشان ترجع للقايمة الافتراضية.</p>
-        <textarea id="qWords" rows="4" placeholder="ازاي، فين، امتى، هل، ممكن، عنوان، موعد، سعر..." oninput="onWordsEdit(this.value)"></textarea>
-        <div class="row" style="margin-top:8px"><span class="muted" id="qWordsInfo"></span><button class="ok" onclick="save()">💾 حفظ</button></div>
+      <div class="card" id="quickCard">
+        <div class="row"><h2 style="margin:0">⚡ الإجابات السريعة</h2><button class="ok" onclick="openQuickEditor(null)">➕ إضافة إجابة</button></div>
+        <p class="muted" style="margin:6px 0 8px">إجابات محفوظة تقدر تحطها بضغطة وانت بترد على سؤال. بعد ما تضيف أو تعدل اضغط 💾 حفظ.</p>
+        <div id="quickList"></div>
+        <div class="row" style="margin-top:8px"><button class="ok" onclick="save()">💾 حفظ الإجابات</button></div>
       </div>
       <div class="toolbar"><input id="qSearch" placeholder="🔍 ابحث في الأسئلة..." oninput="renderQuestions()"></div>
       <div class="card" style="padding:0;overflow:auto"><table id="qTable"></table></div>
@@ -365,6 +366,8 @@ async function login() {
     checkDraft();
     draw();
     loadStats();
+    startAutoRefresh();
+    loadQuestions();
   } catch (e) {
     creds = null;
     $("loginMsg").textContent = e.message;
@@ -1130,19 +1133,6 @@ function esc(v) {
 
 // ---------- الأسئلة ----------
 let questionsCache = [];
-function renderWordsBox() {
-  const ta = $("qWords");
-  if (!ta || !data) return;
-  const list = Array.isArray(data.questionWords) ? data.questionWords : [];
-  ta.value = list.join("، ");
-  $("qWordsInfo").textContent = list.length ? `${list.length} كلمة مخصصة` : "بتستخدم القايمة الافتراضية";
-}
-function onWordsEdit(v) {
-  const list = v.split(/[،,\n]/).map((w) => w.trim()).filter(Boolean);
-  if (list.length) data.questionWords = list; else delete data.questionWords;
-  $("qWordsInfo").textContent = list.length ? `${list.length} كلمة مخصصة` : "بتستخدم القايمة الافتراضية";
-  markDirty();
-}
 function normQ(q) { return q.trim().replace(/\s+/g, " ").toLowerCase(); }
 function customerQuestions(chatId) {
   return chatId ? questionsCache.filter((x) => x.chatId === chatId) : [];
@@ -1170,12 +1160,142 @@ function showCustomerHistory(chatId) {
     <div class="row" style="margin-top:14px"><button class="ghost" data-r="0">إغلاق</button></div>`);
 }
 
+
+// ---------- الإجابات السريعة ----------
+function renderQuickList() {
+  const box = $("quickList");
+  if (!box || !data) return;
+  const list = Array.isArray(data.quickReplies) ? data.quickReplies : [];
+  if (!list.length) { box.innerHTML = '<div class="muted">مفيش إجابات سريعة بعد.</div>'; return; }
+  box.innerHTML = list.map((q, i) => `
+    <div class="node" style="margin:6px 0">
+      <div class="row"><b>${esc(q.title || "بدون عنوان")}</b>
+        <div class="row" style="gap:6px"><button class="ghost" onclick="openQuickEditor(${i})">✏️ تعديل</button><button class="danger" onclick="deleteQuick(${i})">🗑 حذف</button></div></div>
+      <div class="muted" style="white-space:pre-wrap;margin-top:4px">${esc((q.text || "").slice(0, 160))}${(q.text || "").length > 160 ? "…" : ""}</div>
+    </div>`).join("");
+}
+
+function openQuickEditor(index) {
+  if (!data.quickReplies) data.quickReplies = [];
+  const isNew = index === null;
+  if (isNew && data.quickReplies.length >= 50) return toast("الحد 50 إجابة سريعة", "bad");
+  const cur = isNew ? { title: "", text: "" } : data.quickReplies[index];
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal" style="width:min(640px,100%)">
+    <h2 style="margin:0 0 10px">${isNew ? "➕ إجابة سريعة جديدة" : "✏️ تعديل الإجابة السريعة"}</h2>
+    <label class="f">عنوان قصير (حد 80 حرف)</label>
+    <input id="qkTitle" maxlength="80" value="${esc(cur.title)}" style="font-size:16px" placeholder="مثلاً: العنوان">
+    <label class="f">نص الإجابة (حد 3500 حرف)</label>
+    <textarea id="qkText" rows="10" maxlength="3500" style="font-size:16px" placeholder="اكتب الإجابة كاملة هنا...">${esc(cur.text)}</textarea>
+    <div class="row" style="margin-top:12px;justify-content:flex-start;gap:8px">
+      <button class="ok" id="qkSave">💾 حفظ</button><button class="ghost" id="qkCancel">إلغاء</button></div></div>`;
+  document.body.appendChild(bg);
+  bg.querySelector("#qkCancel").onclick = () => bg.remove();
+  bg.addEventListener("click", (e) => { if (e.target === bg) bg.remove(); });
+  bg.querySelector("#qkSave").onclick = () => {
+    const title = bg.querySelector("#qkTitle").value.trim().slice(0, 80);
+    const text = bg.querySelector("#qkText").value.slice(0, 3500);
+    if (!title || !text.trim()) return toast("اكتب العنوان والنص", "bad");
+    if (isNew) data.quickReplies.push({ title, text }); else data.quickReplies[index] = { title, text };
+    markDirty();
+    renderQuickList();
+    bg.remove();
+    toast("اتضافت في القايمة. اضغط 💾 حفظ عشان تتثبت", "ok");
+  };
+  setTimeout(() => bg.querySelector("#qkText").focus(), 50);
+}
+
+async function deleteQuick(index) {
+  const ok = await confirmBox("تحذف الإجابة السريعة دي؟", "حذف", true);
+  if (!ok) return;
+  data.quickReplies.splice(index, 1);
+  markDirty();
+  renderQuickList();
+}
+
+// زرار ⚡ جنب كل خانة إجابة: يفتح القايمة ويحط النص في الخانة (من غير إرسال)
+function openQuick(targetId) {
+  const list = Array.isArray(data.quickReplies) ? data.quickReplies : [];
+  if (!list.length) return toast("مفيش إجابات سريعة. ضيفها من تبويب الأسئلة", "bad");
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  const box = document.createElement("div");
+  box.className = "modal";
+  box.innerHTML = `<h2 style="margin:0 0 10px">⚡ اختار إجابة سريعة</h2>`;
+  list.forEach((q) => {
+    const b = document.createElement("button");
+    b.style.cssText = "display:block;width:100%;text-align:right;margin:6px 0;padding:10px";
+    b.textContent = q.title || (q.text || "").slice(0, 40);
+    b.onclick = () => {
+      const ta = document.getElementById(targetId);
+      if (ta) { ta.value = (ta.value ? ta.value + "\n" : "") + q.text; ta.focus(); }
+      bg.remove();
+    };
+    box.appendChild(b);
+  });
+  const close = document.createElement("button");
+  close.className = "ghost";
+  close.textContent = "إغلاق";
+  close.style.marginTop = "8px";
+  close.onclick = () => bg.remove();
+  box.appendChild(close);
+  bg.appendChild(box);
+  bg.addEventListener("click", (e) => { if (e.target === bg) bg.remove(); });
+  document.body.appendChild(bg);
+}
+
+function addQuickButtons() {
+  document.querySelectorAll('textarea[id^="answer-"], textarea[id^="archive-answer-"]').forEach((ta) => {
+    if (ta.dataset.quick) return;
+    ta.dataset.quick = "1";
+    const b = document.createElement("button");
+    b.className = "icon";
+    b.textContent = "⚡ إجابة سريعة";
+    b.style.marginTop = "6px";
+    b.onclick = () => openQuick(ta.id);
+    ta.insertAdjacentElement("afterend", b);
+  });
+}
+new MutationObserver(() => addQuickButtons()).observe(document.body, { childList: true, subtree: true });
+
+// ---------- الجرس ----------
+function updateBell() {
+  const btn = $("bellBtn");
+  if (!btn) return;
+  const n = (questionsCache || []).filter((x) => x.status === "open" || x.status === "followup_pending").length;
+  btn.classList.toggle("hidden", !creds);
+  $("bellCount").textContent = n ? `(${n})` : "";
+  btn.style.color = n ? "var(--bad)" : "";
+}
+function openQuestionsFromBell() { showTab("questions"); }
+
+// ---------- التحديث التلقائي للأسئلة (كل دقيقة وانت فاتح اللوحة) ----------
+let autoTimer = null;
+function startAutoRefresh() {
+  if (autoTimer) clearInterval(autoTimer);
+  autoTimer = setInterval(refreshQuestionsSilently, 60000);
+}
+async function refreshQuestionsSilently() {
+  if (!creds || document.hidden) return;
+  try {
+    questionsCache = (await api("questions")).questions;
+    updateBell();
+    const open = !$("tab-questions").classList.contains("hidden");
+    // ما نرسمش من جديد لو فيه رد مكتوب ولسه ما اتبعتش
+    const typing = [...document.querySelectorAll('textarea[id^="answer-"], textarea[id^="archive-answer-"]')]
+      .some((t) => t.value.trim() && t.offsetParent);
+    if (open && !typing) { renderQuestions(); renderArchive(); }
+  } catch {}
+}
+
 async function loadQuestions() {
-  renderWordsBox();
   try {
     questionsCache = (await api("questions")).questions;
     renderQuestions();
     renderArchive();
+    updateBell();
+    renderQuickList();
   } catch (e) { toast(e.message, "bad"); }
 }
 
