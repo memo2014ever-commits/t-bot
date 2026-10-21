@@ -120,6 +120,8 @@
   .q-actions button { padding:6px 8px; font-size:12px; }
   .q-archive-table { table-layout:auto; }
   .q-archive-table th, .q-archive-table td { padding:7px 6px; }
+  .notify-wrap { position:relative; display:inline-flex; }
+  .notify-badge { position:absolute; top:-7px; left:-7px; min-width:19px; height:19px; padding:0 5px; border-radius:99px; background:var(--bad); color:#fff; font-size:11px; display:grid; place-items:center; }
 
   @media (max-width:600px) { .tab { padding:8px 10px; font-size:14px; } header h1 { font-size:16px; } .toolbar input { max-width:100%; } }
 </style>
@@ -133,6 +135,7 @@
 </div>
   <div class="row" style="justify-content:flex-end">
     <span id="who" class="sub hidden"></span>
+    <span class="notify-wrap"><button class="ghost" id="notifyBtn" onclick="openPendingQuestions()" title="الأسئلة المستنية ردك">🔔</button><span id="notifyBadge" class="notify-badge hidden">0</span></span>
     <button class="ghost" id="themeBtn" onclick="toggleTheme()">🌙</button>
     <button class="ghost hidden" id="logoutBtn" onclick="logout()">خروج</button>
   </div>
@@ -209,11 +212,10 @@
           <button class="ghost" onclick="exportQuestions()">📥 تصدير</button>
         </div>
       </div>
-      <div class="card" id="qWordsCard">
-        <h2>🧠 كلمات التعرف على السؤال</h2>
-        <p class="muted" style="margin-top:-6px">أي رسالة فيها واحدة من الكلمات دي بتتعتبر سؤال. افصل بينهم بفاصلة أو سطر جديد. سيب الخانة فاضية عشان ترجع للقايمة الافتراضية.</p>
-        <textarea id="qWords" rows="4" placeholder="ازاي، فين، امتى، هل، ممكن، عنوان، موعد، سعر..." oninput="onWordsEdit(this.value)"></textarea>
-        <div class="row" style="margin-top:8px"><span class="muted" id="qWordsInfo"></span><button class="ok" onclick="save()">💾 حفظ</button></div>
+      <div class="card" id="quickRepliesCard">
+        <div class="row"><h2 style="margin:0">⚡ الإجابات السريعة</h2><button class="ok" onclick="addQuickReply()">➕ إضافة</button></div>
+        <p class="muted">احفظ إجابات متكررة لاختيارها مباشرة بجانب خانة الرد.</p>
+        <div id="quickRepliesEditor"></div>
       </div>
       <div class="toolbar"><input id="qSearch" placeholder="🔍 ابحث في الأسئلة..." oninput="renderQuestions()"></div>
       <div class="card" style="padding:0;overflow:auto"><table id="qTable"></table></div>
@@ -365,6 +367,8 @@ async function login() {
     checkDraft();
     draw();
     loadStats();
+    loadQuestions();
+    setInterval(() => { if (!document.hidden && creds) loadQuestions(true); }, 60_000);
   } catch (e) {
     creds = null;
     $("loginMsg").textContent = e.message;
@@ -1130,18 +1134,46 @@ function esc(v) {
 
 // ---------- الأسئلة ----------
 let questionsCache = [];
-function renderWordsBox() {
-  const ta = $("qWords");
-  if (!ta || !data) return;
-  const list = Array.isArray(data.questionWords) ? data.questionWords : [];
-  ta.value = list.join("، ");
-  $("qWordsInfo").textContent = list.length ? `${list.length} كلمة مخصصة` : "بتستخدم القايمة الافتراضية";
+function quickReplies() { return Array.isArray(data?.quickReplies) ? data.quickReplies : []; }
+function renderQuickReplies() {
+  const el = $("quickRepliesEditor");
+  if (!el) return;
+  const list = quickReplies();
+  el.innerHTML = list.length ? list.map((r, i) => `<div class="card" style="padding:10px;margin:8px 0"><div class="row"><b>${esc(r.title)}</b><span><button class="ghost" onclick="editQuickReply(${i})">📝 تعديل</button><button class="danger" onclick="removeQuickReply(${i})">🗑 حذف</button></span></div><div class="muted" style="white-space:pre-wrap;margin-top:5px">${esc(r.text)}</div></div>`).join("") : '<div class="empty">لا توجد إجابات سريعة محفوظة.</div>';
 }
-function onWordsEdit(v) {
-  const list = v.split(/[،,\n]/).map((w) => w.trim()).filter(Boolean);
-  if (list.length) data.questionWords = list; else delete data.questionWords;
-  $("qWordsInfo").textContent = list.length ? `${list.length} كلمة مخصصة` : "بتستخدم القايمة الافتراضية";
-  markDirty();
+function quickReplyForm(index = -1) {
+  const item = index >= 0 ? quickReplies()[index] : { title: "", text: "" };
+  const bg = document.createElement("div"); bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal"><h2>${index >= 0 ? "📝 تعديل" : "➕ إضافة"} إجابة سريعة</h2><label class="f">عنوان الإجابة</label><input id="qr-title" maxlength="80" value="${esc(item.title)}" placeholder="مثلاً: رد موعد اللجنة"><label class="f">نص الإجابة</label><textarea id="qr-text" rows="8" maxlength="3500" placeholder="اكتب نص الإجابة كاملًا...">${esc(item.text)}</textarea><div class="row" style="margin-top:12px"><button class="ok" data-save="1">💾 حفظ</button><button class="ghost" data-close="1">إلغاء</button></div></div>`;
+  bg.addEventListener("click", (e) => {
+    if (e.target.dataset.save) {
+      const title = bg.querySelector("#qr-title").value.trim(), text = bg.querySelector("#qr-text").value.trim();
+      if (!title || !text) return toast("اكتب العنوان والنص أولاً", "bad");
+      const list = [...quickReplies()];
+      if (index >= 0) list[index] = { title, text }; else list.push({ title, text });
+      data.quickReplies = list; bg.remove(); renderQuickReplies(); markDirty();
+    } else if (e.target === bg || e.target.dataset.close) bg.remove();
+  });
+  document.body.appendChild(bg); bg.querySelector("#qr-title").focus();
+}
+function addQuickReply() { quickReplyForm(); }
+function editQuickReply(index) { quickReplyForm(index); }
+async function removeQuickReply(index) {
+  const ok = await confirmBox("حذف الإجابة السريعة؟", "حذف", true);
+  if (!ok) return;
+  data.quickReplies = quickReplies().filter((_, i) => i !== index);
+  renderQuickReplies(); markDirty();
+}
+function pickQuickReply(id) {
+  const list = quickReplies();
+  if (!list.length) return toast("أضف إجابات سريعة أولاً من بطاقة الإجابات السريعة", "bad");
+  const bg = document.createElement("div"); bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal"><h2>⚡ اختر إجابة سريعة</h2>${list.map((r, i) => `<button class="ghost" data-i="${i}" style="display:block;width:100%;text-align:right;margin:7px 0"><b>${esc(r.title)}</b><br><span class="muted">${esc(shortText(r.text, 100))}</span></button>`).join("")}<button class="ghost" data-close="1" style="margin-top:8px">إلغاء</button></div>`;
+  bg.addEventListener("click", (e) => {
+    if (e.target.dataset.i !== undefined) { const input = document.getElementById(`answer-${id}`); if (input) input.value = list[Number(e.target.dataset.i)].text; bg.remove(); }
+    else if (e.target === bg || e.target.dataset.close) bg.remove();
+  });
+  document.body.appendChild(bg);
 }
 function normQ(q) { return q.trim().replace(/\s+/g, " ").toLowerCase(); }
 function customerQuestions(chatId) {
@@ -1150,6 +1182,18 @@ function customerQuestions(chatId) {
 function answerEntries(x) {
   if (Array.isArray(x.answerHistory) && x.answerHistory.length) return x.answerHistory;
   return x.answer ? [{ t: x.answeredAt || x.t, text: x.answer, messageId: null }] : [];
+}
+
+function updateNotificationBell() {
+  const pending = questionsCache.filter((x) => !["answered", "awaiting_followup", "archived"].includes(x.status)).length;
+  const badge = $("notifyBadge");
+  if (!badge) return;
+  badge.textContent = pending > 99 ? "99+" : String(pending);
+  badge.classList.toggle("hidden", pending === 0);
+}
+function openPendingQuestions() {
+  showTab("questions");
+  loadQuestions(true);
 }
 
 function showCustomerHistory(chatId) {
@@ -1170,13 +1214,17 @@ function showCustomerHistory(chatId) {
     <div class="row" style="margin-top:14px"><button class="ghost" data-r="0">إغلاق</button></div>`);
 }
 
-async function loadQuestions() {
-  renderWordsBox();
+async function loadQuestions(silent = false) {
+  const drafts = {};
+  document.querySelectorAll('textarea[id^="answer-"]').forEach((el) => { if (el.value) drafts[el.id] = el.value; });
   try {
     questionsCache = (await api("questions")).questions;
+    renderQuickReplies();
     renderQuestions();
     renderArchive();
-  } catch (e) { toast(e.message, "bad"); }
+    Object.entries(drafts).forEach(([id, value]) => { const el = $(id); if (el) el.value = value; });
+    updateNotificationBell();
+  } catch (e) { if (!silent) toast(e.message, "bad"); }
 }
 
 function renderQuestions() {
@@ -1193,9 +1241,9 @@ function renderQuestions() {
       <td>${counts[normQ(x.q)] > 1 ? `<span class="chip">${counts[normQ(x.q)]}</span>` : "1"}</td>
       <td>${fmtTime(x.t)}</td>
       <td style="min-width:280px">
-        ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">المتابعات: ${x.followups?.length || 0}/3<br>${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>💾 حفظ وإرسال التعديل</button></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد<br><button class="ghost" style="margin-top:6px" onclick='showFollowup(${JSON.stringify(x.id)})'>📩 عرض متابعة العميل</button><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال الرد</button>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
+        ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">المتابعات: ${x.followups?.length || 0}/3<br>${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><button class="ghost" style="margin-top:5px" onclick='pickQuickReply(${JSON.stringify(x.id)})'>⚡ إجابة سريعة</button><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>💾 حفظ وإرسال التعديل</button></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد<br><button class="ghost" style="margin-top:6px" onclick='showFollowup(${JSON.stringify(x.id)})'>📩 عرض متابعة العميل</button><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><button class="ghost" style="margin-top:5px" onclick='pickQuickReply(${JSON.stringify(x.id)})'>⚡ إجابة سريعة</button><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال الرد</button>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ghost" style="margin-top:5px" onclick='pickQuickReply(${JSON.stringify(x.id)})'>⚡ إجابة سريعة</button><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
       </td>
-      <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}<button class="ghost" style="margin-bottom:6px" onclick='closeQuestionFromPanel(${JSON.stringify(x.id)})'>🔒 إغلاق</button><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
+      <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}<button class="ghost" style="margin-bottom:6px" onclick='closeQuestionFromPanel(${JSON.stringify(x.id)})'>🔒 إغلاق</button><button class="danger" onclick="deleteQ(${JSON.stringify(x.id)})">🗑</button></td>
     </tr>`).join("");
 }
 
@@ -1266,7 +1314,7 @@ function renderArchive() {
       <td><span class="muted">${answerEntries(x).length} إجابات</span><br><span>${esc(shortText(x.answer || answerEntries(x).at(-1)?.text || ""))}</span><br><button class="ghost" style="margin-top:4px" onclick='showConversation(${JSON.stringify(x.id)})'>🗂️ عرض المحادثة</button></td>
       <td>${fmtTime(x.t)}</td>
       <td>${x.answeredAt ? fmtTime(x.answeredAt) : "—"}</td>
-      <td><div class="q-actions"><button class="ghost" onclick='editArchiveAnswer(${JSON.stringify(x.id)})'>📝 تعديل/إرسال</button><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑 حذف</button></div></td>
+      <td><div class="q-actions"><button class="ghost" onclick='editArchiveAnswer(${JSON.stringify(x.id)})'>📝 تعديل/إرسال</button><button class="danger" onclick="deleteQ(${JSON.stringify(x.id)})">🗑 حذف</button></div></td>
     </tr>`).join("");
 }
 
@@ -1330,7 +1378,7 @@ async function deleteQ(raw) {
   if (!ok) return;
   try {
     await api("delq", { ref: raw });
-    questionsCache = questionsCache.filter((x) => x.raw !== raw);
+    questionsCache = questionsCache.filter((x) => x.id !== raw);
     renderQuestions();
     renderArchive();
     toast("اتمسح", "ok");
