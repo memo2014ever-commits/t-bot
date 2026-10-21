@@ -67,6 +67,27 @@ export async function getUnmatched() {
 export async function deleteUnmatched(word) { await redis(["HDEL", "unmatched", word]); }
 export async function clearUnmatched() { await redis(["DEL", "unmatched"]); }
 
+// سؤال معلّق لمدة 10 دقايق لحد ما العميل يختار من "تقصد؟" أو يأكد إنه يبعته
+function pendKey(chatId) {
+  return "pend:" + createHash("sha256").update(String(chatId)).digest("hex").slice(0, 16);
+}
+export async function setPending(chatId, text) {
+  await redis(["SET", pendKey(chatId), String(text).slice(0, 500), "EX", 600]);
+}
+export async function takePending(chatId) {
+  const k = pendKey(chatId);
+  const v = await redis(["GET", k]);
+  if (v) await redis(["DEL", k]);
+  return v;
+}
+
+// فحص المهلة مرة كل ساعة بس (قفل زمني) بدل كل رسالة
+export async function maybeExpireQuestions(now = Date.now()) {
+  const ok = await redis(["SET", "expiry:lock", "1", "NX", "EX", 3600]);
+  if (ok !== "OK") return [];
+  return closeExpiredQuestions(now);
+}
+
 export async function pushQuestion(text, chatId, customerName = "") {
   await redis(["LPUSH", "questions", JSON.stringify({
     id: randomUUID(), t: Date.now(), q: String(text).slice(0, 500), chatId: String(chatId), customerName: String(customerName).slice(0, 150), status: "open",

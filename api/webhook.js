@@ -1,7 +1,7 @@
 // بوت تلجرام: قايمة + رجوع + روابط + زرار سؤال + بحث بالكلمات + تحويل الطبي للخط الساخن
 import { Bot, InlineKeyboard, webhookCallback } from "grammy";
 import {
-  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, questionForReply, addFollowup, closeExpiredQuestions,
+  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, questionForReply, addFollowup, closeExpiredQuestions, maybeExpireQuestions, setPending, takePending,
 } from "./stats.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
@@ -81,6 +81,9 @@ function searchNodes(content, text) {
     const kws = [...new Set([node.label, ...(Array.isArray(node.keywords) ? node.keywords : [])]
       .map(norm).filter((k) => k.length >= 2))];
     const nameScore = kws.filter((k) => t.includes(" " + k + " ")).length * 2;
+    // الكلمة المفردة جوه أي عبارة (زي "الاوراق" جوه "الأوراق المطلوبة")
+    const kwTokens = new Set(kws.flatMap((k) => k.split(" ")).filter((x) => x.length >= 3 && !COMMON.has(x)));
+    const tokenScore = qt.filter((tok) => kwTokens.has(tok)).length;
 
     let snippet = "";
     let textScore = 0;
@@ -89,9 +92,9 @@ function searchNodes(content, text) {
       const line = lines.find((l) => norm(l).split(" ").includes(tok));
       if (line) { textScore++; if (!snippet) snippet = line.trim(); }
     }
-    const score = nameScore + textScore;
+    const score = nameScore + tokenScore + textScore;
     if (score > 0) {
-      hits.push({ path, node, score, matchedIn: nameScore > 0 ? "name" : "text", snippet });
+      hits.push({ path, node, score, matchedIn: nameScore + tokenScore > 0 ? "name" : "text", snippet });
     }
   }
   return hits.sort((x, y) => y.score - x.score).slice(0, 5);
@@ -194,6 +197,67 @@ bot.callbackQuery(/^n:(.*)$/, (ctx) => showNode(ctx, ctx.match[1], true));
 bot.callbackQuery(/^b:(.*)$/, (ctx) => showNode(ctx, ctx.match[1], false));
 bot.callbackQuery("home", (ctx) => showNode(ctx, "", false));
 
+
+const SHORT_REPLIES = new Set([
+  "شكرا", "شكراً", "تمام", "تمام شكرا", "اهلا", "أهلا", "السلام عليكم", "وعليكم السلام", "الو", "الوو", "ok", "اوك", "ماشي",
+].map((x) => norm(x)));
+
+// الرد على خانة السؤال: قصير؟ ← بحث ← (إجابة واحدة: يرد) (أكتر: تقصد + بديل) (مفيش: يسجل)
+async function handleAskReply(ctx, text, content, m, root) {
+  const cleaned = norm(text);
+  if (cleaned.length < 3 || SHORT_REPLIES.has(cleaned)) {
+    return ctx.reply("اكتب سؤالك بشكل أوضح 👇", {
+      reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
+    });
+  }
+  const hits = searchNodes(content, text);
+  if (hits.length === 1) return showHit(ctx, hits[0]);
+  if (hits.length > 1) {
+    try { await setPending(ctx.chat.id, text); } catch {}
+    return showChoices(ctx, hits, content, m, true);
+  }
+  return saveAndThank(ctx, text, m, root);
+}
+
+// تسجيل السؤال + الشكر + المتبقي من الحد
+async function saveAndThank(ctx, text, m, root) {
+  let allowed = true;
+  try { allowed = await questionAllowed(ctx.chat.id); } catch {}
+  if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(root));
+  const customerName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || (ctx.from?.username ? `@${ctx.from.username}` : "");
+  try { await pushQuestion(text, ctx.chat.id, customerName); } catch {}
+  const left = await questionsLeft(ctx.chat.id).catch(() => 0);
+  const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
+  return ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
+}
+
+// اختيارات "تقصد؟" (وممكن زرار بديل لو ده مش قصده)
+async function showChoices(ctx, hits, content, m, withSendAnyway) {
+  const top = hits.slice(0, 4);
+  const kb = new InlineKeyboard();
+  top.forEach((h) => {
+    if (h.node.url) kb.url(h.node.label, h.node.url).row();
+    else kb.text(h.node.label, `n:${h.path}`).row();
+  });
+  if (withSendAnyway) kb.text("📝 لا، ده مش قصدي، ابعت سؤالي", "pq").row();
+  const lines = top.map((h) => choiceLine(content, h)).join("\n");
+  return ctx.reply(toHtml((m.didYouMean || DEFAULT_DYM) + "\n\n" + lines), HTML_OPTS(kb));
+}
+
+// العميل قال "ده مش قصدي": نسجل السؤال المعلّق
+bot.callbackQuery("pq", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  let text = null;
+  try { text = await takePending(ctx.chat.id); } catch {}
+  const content = await getContent().catch(() => ({}));
+  const m = content.messages || {};
+  const root = render(content, "").markup;
+  if (!text) return ctx.reply("انتهت المهلة، اكتب سؤالك تاني 👇", {
+    reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
+  });
+  return saveAndThank(ctx, text, m, root);
+});
+
 // زرار "ابعت سؤالك"
 bot.callbackQuery(/^ask:(.*)$/, async (ctx) => {
   const path = ctx.match[1];
@@ -235,7 +299,7 @@ bot.on("message:text", async (ctx) => {
   try { await trackActive(ctx.chat.id); } catch {}
   const content = await getContent().catch(() => ({}));
   const m = content.messages || {};
-  try { await notifyExpired(await closeExpiredQuestions(), m.autoClosed || DEFAULT_CLOSED_AUTO); } catch {}
+  try { await notifyExpired(await maybeExpireQuestions(), m.autoClosed || DEFAULT_CLOSED_AUTO); } catch {}
   const text = ctx.message.text || "";
   const root = render(content, "").markup;
 
@@ -272,41 +336,17 @@ bot.on("message:text", async (ctx) => {
     return ctx.reply(toHtml(m.inquiry || DEFAULT_INQUIRY), HTML_OPTS(kb));
   }
 
-  // 2) بحث في المحتوى (زراير + استدعاء + نص)، قبل أي فلتر
-  const hits = searchNodes(content, text);
-  if (hits.length === 1) return showHit(ctx, hits[0]);
-  if (hits.length > 1) {
-    const kb = new InlineKeyboard();
-    hits.forEach((h) => {
-      if (h.node.url) kb.url(h.node.label, h.node.url).row();
-      else kb.text(h.node.label, `n:${h.path}`).row();
-    });
-    const lines = hits.map((h) => choiceLine(content, h)).join("\n");
-    return ctx.reply(toHtml((m.didYouMean || DEFAULT_DYM) + "\n\n" + lines), HTML_OPTS(kb));
-  }
-
-  // 3) رد على خانة السؤال: يتسجل كسؤال لو اجتاز الفلتر
+  // رد على خانة "اكتب سؤالك": البحث الأول، ومفيش حفظ إلا لو مفيش إجابة
   const r = ctx.message.reply_to_message;
   const rText = (r && r.text) || "";
   const prompt = m.askPrompt || DEFAULT_PROMPT;
   const isAskPrompt = rText === prompt || rText.startsWith("اكتب سؤالك") || rText.startsWith("مش واضح إنه سؤال");
-  if (r && r.from?.is_bot && isAskPrompt) {
-    const customWords = Array.isArray(content.questionWords) && content.questionWords.length
-      ? content.questionWords : QUESTION_WORDS;
-    if (!looksLikeQuestion(text, customWords)) {
-      return ctx.reply("مش واضح إنه سؤال، اكتب سؤالك بشكل واضح، مثلاً: ممكن أعرف عنوان لجنة القاهرة؟", {
-        reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
-      });
-    }
-    let allowed = true;
-    try { allowed = await questionAllowed(ctx.chat.id); } catch {}
-    if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(root));
-    const customerName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || (ctx.from?.username ? `@${ctx.from.username}` : "");
-    try { await pushQuestion(text, ctx.chat.id, customerName); } catch {}
-    const left = await questionsLeft(ctx.chat.id).catch(() => 0);
-    const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
-    return ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
-  }
+  if (r && r.from?.is_bot && isAskPrompt) return handleAskReply(ctx, text, content, m, root);
+
+  // بحث عادي في المحتوى (من غير تسجيل أي سؤال)
+  const hits = searchNodes(content, text);
+  if (hits.length === 1) return showHit(ctx, hits[0]);
+  if (hits.length > 1) return showChoices(ctx, hits, content, m, false);
 
   // 4) مفيش تطابق: نسجل الكلمات اللي ما اتطابقتش (بدون أرقام)، ورد عام مع القايمة
   try {

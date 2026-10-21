@@ -229,6 +229,12 @@ export default async function handler(req, res) {
         }
       }
 
+            if (content.quickReplies !== undefined) {
+        if (!Array.isArray(content.quickReplies) || content.quickReplies.length > 50 ||
+            content.quickReplies.some((q) => !q || typeof q.title !== "string" || q.title.length > 80 || typeof q.text !== "string" || q.text.length > 3500)) {
+          return res.status(400).json({ error: "الإجابات السريعة: 50 إجابة كحد أقصى، العنوان 80 حرف، والنص 3500 حرف" });
+        }
+      }
       const cur = await readCurrent();
       // المحرر ما يقدرش يحذف: لو عدد الزراير قل، نرفض
       if (role === "editor" && countNodes(content) < countNodes(cur.content)) {
