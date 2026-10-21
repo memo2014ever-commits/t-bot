@@ -1,0 +1,256 @@
+// خادم لوحة التحكم: تسجيل دخول بدورين (أدمن / محرر)، وقراءة وحفظ وسجل نسخ من GitHub
+// كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
+import { timingSafeEqual } from "crypto";
+import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched } from "./stats.js";
+
+const {
+  ADMIN_USER, ADMIN_PASS,          // الأدمن: يعدّل ويحذف
+  EDITOR_USER, EDITOR_PASS,        // المحرر (اختياري): يعدّل ومايحذفش
+  GITHUB_TOKEN, GITHUB_REPO,
+  GITHUB_FILE = "content.json", GITHUB_BRANCH = "main",
+  BOT_TOKEN,
+} = process.env;
+
+const API = `https://api.github.com/repos/${GITHUB_REPO}/contents/${GITHUB_FILE}`;
+const GH_HEADERS = {
+  Authorization: `Bearer ${GITHUB_TOKEN}`,
+  Accept: "application/vnd.github+json",
+  "User-Agent": "legan-admin",
+};
+
+function safeEq(a = "", b = "") {
+  const A = Buffer.from(String(a)), B = Buffer.from(String(b));
+  return A.length === B.length && timingSafeEqual(A, B);
+}
+
+// يرجع الدور: "admin" أو "editor" أو null
+function authenticate(u, p) {
+  if (ADMIN_USER && safeEq(u, ADMIN_USER) && safeEq(p, ADMIN_PASS)) return "admin";
+  if (EDITOR_USER && safeEq(u, EDITOR_USER) && safeEq(p, EDITOR_PASS)) return "editor";
+  return null;
+}
+
+function countNodes(n) {
+  return 1 + (n.items || []).reduce((a, c) => a + countNodes(c), 0);
+}
+
+function validate(node, isRoot = true, depth = 0) {
+  if (depth > 4) return "الشجرة أعمق من 4 مستويات";
+  if (!node || typeof node.text !== "string") return "فيه عنصر من غير نص";
+  if (node.text.length > 3500) return "نص طويل جداً (الحد 3500 حرف)";
+  if (!isRoot && (!node.label || typeof node.label !== "string")) return "فيه زرار من غير اسم";
+  if (node.action !== undefined && node.action !== "ask") return "نوع الزرار غلط";
+  if (node.keywords !== undefined && (!Array.isArray(node.keywords) || node.keywords.length > 30 ||
+      node.keywords.some((k) => typeof k !== "string" || k.length > 40))) {
+    return "كلمات الاستدعاء لازم تكون قايمة كلمات قصيرة (حد 30 كلمة)";
+  }
+  if (node.url !== undefined && node.url !== "" && !/^https:\/\/[^\s]+$/.test(node.url)) return "الرابط لازم يبدأ بـ https://";
+  if (node.items !== undefined && !Array.isArray(node.items)) return "items لازم تكون قايمة";
+  if ((node.items || []).length > 50) return "الحد 50 زرار في القايمة الواحدة";
+  for (const child of node.items || []) {
+    const err = validate(child, false, depth + 1);
+    if (err) return err;
+  }
+  return null;
+}
+
+async function readCurrent(ref = GITHUB_BRANCH) {
+  const j = await (await fetch(`${API}?ref=${ref}`, { headers: GH_HEADERS })).json();
+  return { sha: j.sha, content: JSON.parse(Buffer.from(j.content, "base64").toString("utf8")) };
+}
+
+async function sendTelegram(chatId, answer, messages = {}, finalAnswer = false, followupCount = 0) {
+  if (!BOT_TOKEN) throw new Error("BOT_TOKEN غير مضبوط على السيرفر");
+  const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text: `📩 رد على سؤالك:\n\n${answer}${finalAnswer ? "" : (followupCount > 0 ? `\n\n📩 المتابعة: ${followupCount}/3` : (messages.answerFooter || "\n\n📌 مسموح بحد أقصى 3 متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك»."))}`, ...(finalAnswer ? {} : { reply_markup: { force_reply: true, input_field_placeholder: messages.followupPlaceholder || "اكتب متابعة السؤال هنا..." } }) }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok) throw new Error(j.description || "فشل إرسال الإجابة إلى تيليجرام");
+  return j.result;
+}
+
+async function sendCloseNotice(chatId, automatic = false, messages = {}) {
+  if (!BOT_TOKEN || !chatId) return;
+  const text = automatic ? (messages.autoClosed || "🔒 تم إغلاق سؤالك تلقائيًا لعدم وجود متابعة خلال 24 ساعة.\n\nإذا كان لديك استفسار جديد، استخدم زر «ابعت سؤالك» 👇") : (messages.manualClosed || "🔒 تم إغلاق هذا السؤال من الإدارة.\n\nإذا كان لديك استفسار جديد، استخدم زر «ابعت سؤالك» 👇");
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text }) });
+}
+
+export default async function handler(req, res) {
+  if (req.method !== "POST") return res.status(405).json({ error: "method" });
+
+  const { username, password, action, content, message, ref, answer, answerIndex } = req.body || {};
+  const role = authenticate(username, password);
+  if (!role) return res.status(401).json({ error: "اسم المستخدم أو الباسورد غلط" });
+
+  try {
+    if (action === "get") {
+      const { content: data } = await readCurrent();
+      return res.json({ content: data, role });
+    }
+
+    if (action === "stats") {
+      return res.json(await getStats());
+    }
+
+    if (action === "statsDay") {
+      if (typeof ref !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(ref)) {
+        return res.status(400).json({ error: "تاريخ غير صحيح" });
+      }
+      return res.json(await getStatsByDay(ref));
+    }
+
+    if (action === "questions") {
+      const expired = await closeExpiredQuestions();
+      const systemMessages = (await readCurrent()).content.messages || {};
+      await Promise.all(expired.map((x) => sendCloseNotice(x.chatId, true, systemMessages).catch(() => {})));
+      return res.json({ questions: await getQuestions() });
+    }
+
+    if (action === "answerQuestion") {
+      if (typeof ref !== "string" || ref.length > 200) return res.status(400).json({ error: "السؤال غير صحيح" });
+      if (typeof answer !== "string" || !answer.trim() || answer.length > 3500) {
+        return res.status(400).json({ error: "الإجابة مطلوبة وبحد أقصى 3500 حرف" });
+      }
+      const questions = await getQuestions();
+      const question = questions.find((x) => x.id === ref || x.raw === ref);
+      if (!question) return res.status(404).json({ error: "السؤال غير موجود" });
+      if (!question.chatId) return res.status(400).json({ error: "السؤال قديم ولا يحتوي على معرّف العميل" });
+      const systemMessages = (await readCurrent()).content.messages || {};
+      const followupCount = (question.followups || []).length;
+      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages, followupCount >= 3, followupCount);
+      const updated = await answerQuestion(ref, answer.trim(), telegramMessage.message_id);
+      if (!updated || updated.error) return res.status(500).json({ error: updated?.error || "فشل تحديث حالة السؤال" });
+      if (updated.status === "archived") await sendCloseNotice(updated.chatId, false, systemMessages).catch(() => {});
+      return res.json({ ok: true, question: updated });
+    }
+
+    if (action === "editAnswer") {
+      if (typeof ref !== "string" || ref.length > 200 || !Number.isInteger(answerIndex) || answerIndex < 0) return res.status(400).json({ error: "بيانات الإجابة غير صحيحة" });
+      if (typeof answer !== "string" || !answer.trim() || answer.length > 3500) return res.status(400).json({ error: "الإجابة مطلوبة وبحد أقصى 3500 حرف" });
+      const questions = await getQuestions();
+      const question = questions.find((x) => x.id === ref || x.raw === ref);
+      if (!question) return res.status(404).json({ error: "السؤال غير موجود" });
+      if (!question.chatId) return res.status(400).json({ error: "السؤال لا يحتوي على معرّف العميل" });
+      const systemMessages = (await readCurrent()).content.messages || {};
+      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages, question.status === "archived", (question.followups || []).length);
+      const updated = await updateAnswerHistory(ref, answerIndex, answer.trim(), telegramMessage.message_id);
+      if (!updated || updated.error) return res.status(500).json({ error: updated?.error || "فشل تحديث الإجابة" });
+      return res.json({ ok: true, question: updated });
+    }
+
+    if (action === "closeQuestion") {
+      if (typeof ref !== "string" || ref.length > 200) return res.status(400).json({ error: "السؤال غير صحيح" });
+      const updated = await closeQuestion(ref, "manual");
+      if (!updated) return res.status(404).json({ error: "السؤال غير موجود" });
+      const systemMessages = (await readCurrent()).content.messages || {};
+      await sendCloseNotice(updated.chatId, false, systemMessages).catch(() => {});
+      return res.json({ ok: true, question: updated });
+    }
+
+    if (action === "delq") {
+      if (typeof ref !== "string" || ref.length > 1000) return res.status(400).json({ error: "سؤال غلط" });
+      await deleteQuestion(ref);
+      return res.json({ ok: true });
+    }
+
+    if (action === "unmatched") {
+      return res.json({ words: await getUnmatched() });
+    }
+
+    if (action === "delunmatched") {
+      if (typeof ref !== "string" || !ref.trim() || ref.length > 100) return res.status(400).json({ error: "كلمة غلط" });
+      await deleteUnmatched(ref);
+      return res.json({ ok: true });
+    }
+
+    if (action === "clearunmatched") {
+      await clearUnmatched();
+      return res.json({ ok: true });
+    }
+
+    if (action === "presslog") {
+      return res.json({ log: await getPressLog() });
+    }
+
+    if (action === "reset") {
+      if (role !== "admin") return res.status(403).json({ error: "التصفير للأدمن بس" });
+      await resetStats();
+      return res.json({ ok: true });
+    }
+
+    if (action === "history") {
+      const r = await fetch(
+        `https://api.github.com/repos/${GITHUB_REPO}/commits?path=${GITHUB_FILE}&sha=${GITHUB_BRANCH}&per_page=20`,
+        { headers: GH_HEADERS }
+      );
+      const list = await r.json();
+      return res.json({
+        commits: list.map((c) => ({
+          sha: c.sha,
+          date: c.commit.author.date,
+          message: c.commit.message,
+        })),
+      });
+    }
+
+    if (action === "version") {
+      if (!/^[0-9a-f]{7,40}$/.test(ref || "")) return res.status(400).json({ error: "نسخة غلط" });
+      const { content: data } = await readCurrent(ref);
+      return res.json({ content: data });
+    }
+
+    if (action === "save") {
+      const err = validate(content);
+      if (err) return res.status(400).json({ error: err });
+      if (content.inquiryKeywords !== undefined) {
+        if (!Array.isArray(content.inquiryKeywords) || content.inquiryKeywords.length > 100 ||
+            content.inquiryKeywords.some((w) => typeof w !== "string" || w.length > 40)) {
+          return res.status(400).json({ error: "كلمات الاستعلام لازم تكون قايمة كلمات قصيرة (حد 100 كلمة)" });
+        }
+      }
+      if (content.medicalKeywords !== undefined) {
+        if (!Array.isArray(content.medicalKeywords) || content.medicalKeywords.length > 100 ||
+            content.medicalKeywords.some((w) => typeof w !== "string" || w.length > 40)) {
+          return res.status(400).json({ error: "كلمات الطب لازم تكون قايمة كلمات قصيرة (حد 100 كلمة)" });
+        }
+      }
+      if (content.questionWords !== undefined) {
+        if (!Array.isArray(content.questionWords) || content.questionWords.length > 200 ||
+            content.questionWords.some((w) => typeof w !== "string" || w.length > 30)) {
+          return res.status(400).json({ error: "كلمات السؤال لازم تكون قايمة كلمات قصيرة (حد 200 كلمة)" });
+        }
+      }
+      if (content.messages !== undefined) {
+        if (typeof content.messages !== "object") return res.status(400).json({ error: "رسايل النظام غلط" });
+        for (const v of Object.values(content.messages)) {
+          if (typeof v !== "string" || v.length > 500) return res.status(400).json({ error: "رسالة نظام طويلة أو غلط (الحد 500 حرف)" });
+        }
+      }
+
+      const cur = await readCurrent();
+      // المحرر ما يقدرش يحذف: لو عدد الزراير قل، نرفض
+      if (role === "editor" && countNodes(content) < countNodes(cur.content)) {
+        return res.status(403).json({ error: "المحرر مايقدرش يحذف زراير، اطلب من الأدمن" });
+      }
+
+      const r = await fetch(API, {
+        method: "PUT",
+        headers: GH_HEADERS,
+        body: JSON.stringify({
+          message: (message || "تعديل من لوحة التحكم").slice(0, 200),
+          content: Buffer.from(JSON.stringify(content, null, 2)).toString("base64"),
+          sha: cur.sha,
+          branch: GITHUB_BRANCH,
+        }),
+      });
+      if (!r.ok) return res.status(500).json({ error: "فشل الحفظ على GitHub" });
+      return res.json({ ok: true });
+    }
+
+    return res.status(400).json({ error: "action غلط" });
+  } catch {
+    return res.status(500).json({ error: "حصل خطأ في السيرفر" });
+  }
+}
