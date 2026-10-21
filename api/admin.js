@@ -151,8 +151,7 @@ export default async function handler(req, res) {
 
     if (action === "delq") {
       if (typeof ref !== "string" || ref.length > 1000) return res.status(400).json({ error: "سؤال غلط" });
-      const deleted = await deleteQuestion(ref);
-      if (!deleted) return res.status(404).json({ error: "السؤال غير موجود أو تم حذفه بالفعل" });
+      await deleteQuestion(ref);
       return res.json({ ok: true });
     }
 
@@ -227,11 +226,6 @@ export default async function handler(req, res) {
         if (typeof content.messages !== "object") return res.status(400).json({ error: "رسايل النظام غلط" });
         for (const v of Object.values(content.messages)) {
           if (typeof v !== "string" || v.length > 500) return res.status(400).json({ error: "رسالة نظام طويلة أو غلط (الحد 500 حرف)" });
-        }
-      }
-      if (content.quickReplies !== undefined) {
-        if (!Array.isArray(content.quickReplies) || content.quickReplies.length > 50 || content.quickReplies.some((x) => !x || typeof x.title !== "string" || typeof x.text !== "string" || !x.title.trim() || !x.text.trim() || x.title.length > 80 || x.text.length > 3500)) {
-          return res.status(400).json({ error: "الإجابات السريعة غير صحيحة (حتى 50 إجابة)" });
         }
       }
 
