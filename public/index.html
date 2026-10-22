@@ -211,10 +211,10 @@
         </div>
       </div>
       <div class="card" id="quickCard">
-        <div class="row"><h2 style="margin:0">⚡ الإجابات السريعة</h2><button class="ok" onclick="openQuickEditor(null)">➕ إضافة إجابة</button></div>
-        <p class="muted" style="margin:6px 0 8px">إجابات محفوظة تقدر تحطها بضغطة وانت بترد على سؤال. بعد ما تضيف أو تعدل اضغط 💾 حفظ.</p>
-        <div id="quickList"></div>
-        <div class="row" style="margin-top:8px"><button class="ok" onclick="save()">💾 حفظ الإجابات</button></div>
+        <div class="row">
+          <h2 style="margin:0">⚡ الإجابات السريعة</h2>
+          <div class="row" style="gap:8px"><span class="muted" id="quickCount"></span><button class="ok" onclick="openQuickManager()">⚡ إدارة</button></div>
+        </div>
       </div>
       <div class="toolbar"><input id="qSearch" placeholder="🔍 ابحث في الأسئلة..." oninput="renderQuestions()"></div>
       <div class="card" style="padding:0;overflow:auto"><table id="qTable"></table></div>
@@ -1163,9 +1163,12 @@ function showCustomerHistory(chatId) {
 
 // ---------- الإجابات السريعة ----------
 function renderQuickList() {
-  const box = $("quickList");
-  if (!box || !data) return;
+  if (!data) return;
   const list = Array.isArray(data.quickReplies) ? data.quickReplies : [];
+  const cnt = $("quickCount");
+  if (cnt) cnt.textContent = list.length ? `${list.length} إجابة` : "فاضية";
+  const box = $("quickList");
+  if (!box) return;
   if (!list.length) { box.innerHTML = '<div class="muted">مفيش إجابات سريعة بعد.</div>'; return; }
   box.innerHTML = list.map((q, i) => `
     <div class="node" style="margin:6px 0">
@@ -1173,6 +1176,26 @@ function renderQuickList() {
         <div class="row" style="gap:6px"><button class="ghost" onclick="openQuickEditor(${i})">✏️ تعديل</button><button class="danger" onclick="deleteQuick(${i})">🗑 حذف</button></div></div>
       <div class="muted" style="white-space:pre-wrap;margin-top:4px">${esc((q.text || "").slice(0, 160))}${(q.text || "").length > 160 ? "…" : ""}</div>
     </div>`).join("");
+}
+
+
+// نافذة إدارة الإجابات السريعة (بتتفتح من صفحة الأسئلة)
+function openQuickManager() {
+  if (!data) return;
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal" style="width:min(720px,100%)">
+    <div class="row"><h2 style="margin:0">⚡ الإجابات السريعة</h2><button class="ok" id="qmAdd">➕ إضافة</button></div>
+    <p class="muted" style="margin:6px 0 10px">بعد أي تعديل اضغط 💾 حفظ عشان يتثبت للبوت.</p>
+    <div id="quickList" style="max-height:60vh;overflow:auto"></div>
+    <div class="row" style="margin-top:12px;justify-content:flex-start;gap:8px">
+      <button class="ok" id="qmSave">💾 حفظ</button><button class="ghost" id="qmClose">إغلاق</button></div></div>`;
+  document.body.appendChild(bg);
+  bg.querySelector("#qmAdd").onclick = () => openQuickEditor(null);
+  bg.querySelector("#qmSave").onclick = () => save();
+  bg.querySelector("#qmClose").onclick = () => bg.remove();
+  bg.addEventListener("click", (e) => { if (e.target === bg) bg.remove(); });
+  renderQuickList();
 }
 
 function openQuickEditor(index) {
