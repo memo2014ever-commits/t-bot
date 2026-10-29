@@ -160,7 +160,6 @@
       <button class="tab" data-tab="presslog" onclick="showTab('presslog')">🧾 سجل الضغطات</button>
       <button class="tab" data-tab="history" onclick="showTab('history')">🕘 النسخ السابقة</button>
       <button class="tab" data-tab="bans" onclick="showTab('bans')">🚫 المحظورون</button>
-      <button class="tab" data-tab="help" onclick="showTab('help')">💡 مساعدة</button>
     </nav>
 
     <!-- الإحصائيات -->
@@ -271,27 +270,9 @@
         <h2 style="margin:0">🚫 العملاء المحظورون</h2>
         <button class="ghost" onclick="loadBans()">🔄 تحديث</button>
       </div>
+      <div class="toolbar"><input id="bansSearch" placeholder="🔍 ابحث بمعرف العميل أو السبب أو الموظف..." oninput="renderBans()"></div>
       <div class="card" style="padding:0;overflow:auto"><table id="bansTable"></table></div>
       <p class="muted">العملاء المحظورون لا يتلقون أي رد من البوت. الحظر للأدمن فقط.</p>
-    </div>
-
-    <!-- المساعدة -->
-    <div id="tab-help" class="hidden card">
-      <h2>إزاي تستخدم اللوحة</h2>
-      <ul style="line-height:2">
-        <li><b>القايمة الرئيسية</b> هي اللي بتظهر لما العميل يكتب /start.</li>
-        <li><b>➕ زرار جوه</b> بيضيف زرار تحت العنصر ده. الحد 4 مستويات و50 زرار في القايمة.</li>
-        <li><b>⬆️ ⬇️</b> بيرتبوا الزراير، و<b>📄</b> بيكرر الزرار بكل محتواه.</li>
-        <li><b>👁</b> بيعرض شكل الرسالة زي ما هتظهر في تلجرام قبل الحفظ.</li>
-        <li><b>🔑 كلمات الاستدعاء:</b> كلمات تخلي الزرار يظهر لو العميل كتبها (زي "لجنة" أو "عنوان").</li>
-        <li><b>💬 زرار سؤال:</b> فعّل خانة "زرار سؤال" في أي زرار، والعميل يقدر يكتب سؤاله بعدها، والسؤال يظهر في تبويب الأسئلة.</li>
-        <li><b>كلمة تفتح رابط داخل النص:</b> اكتب في النص <code>[اضغط هنا](https://...)</code>، وتظهر كلمة "اضغط هنا" قابلة للضغط.</li>
-        <li><b>زرار يفتح رابط تحت الرسالة:</b> املى خانة "🔗 رابط" في الزرار.</li>
-        <li><b>القوايم بتتفتح وتتقفل</b> بالضغط على اسمها (زي dropdown).</li>
-        <li><b>💾</b> الزرار اللي تحت كل عنصر بيحفظ الشجرة كلها.</li>
-        <li>النصوص اللي بين <b>[ ]</b> لازم تتملى بالمعلومة الرسمية قبل النشر.</li>
-        <li>بعد الحفظ استنى دقيقة أو اتنين، وابعت /start للبوت من جديد.</li>
-      </ul>
     </div>
   </section>
 </main>
@@ -424,7 +405,7 @@ function dropDraft() {
 // ---------- التنقل ----------
 function showTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  ["stats", "menu", "questions", "archive", "presslog", "history", "bans", "help"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
+  ["stats", "menu", "questions", "archive", "presslog", "history", "bans"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
   if (name === "stats") loadStats();
   if (name === "questions") loadQuestions();
   if (name === "archive") loadQuestions();
@@ -1740,15 +1721,25 @@ async function loadBans() {
 
 function renderBans() {
   const t = $("bansTable");
-  if (!bansCache.length) { t.innerHTML = '<tr><td class="muted">مفيش عملاء محظورون</td></tr>'; return; }
+  const q = ($("bansSearch")?.value || "").trim().toLowerCase();
+  const rows = bansCache.filter((b) =>
+    !q || b.chatId.includes(q) || (b.reason || "").toLowerCase().includes(q) || (b.bannedBy || "").toLowerCase().includes(q)
+  );
+  if (!rows.length) { t.innerHTML = `<tr><td class="muted">${bansCache.length ? "لا توجد نتائج للبحث" : "مفيش عملاء محظورون"}</td></tr>`; return; }
   t.innerHTML = `<tr><th>معرّف العميل</th><th>السبب</th><th>تاريخ الحظر</th><th>بواسطة</th><th></th></tr>` +
-    bansCache.map((b) => `<tr>
-      <td>${esc(b.chatId)}</td>
-      <td>${esc(b.reason || "—")}</td>
-      <td>${fmtTime(Number(b.bannedAt))}</td>
-      <td>${esc(b.bannedBy || "—")}</td>
-      <td><button class="ghost" onclick='unbanUser(${JSON.stringify(b.chatId)})'>✅ رفع الحظر</button></td>
-    </tr>`).join("");
+    rows.map((b) => {
+      const history = customerQuestions(b.chatId);
+      return `<tr>
+        <td>${esc(b.chatId)}</td>
+        <td>${esc(b.reason || "—")}</td>
+        <td>${fmtTime(Number(b.bannedAt))}</td>
+        <td>${esc(b.bannedBy || "—")}</td>
+        <td style="white-space:nowrap">
+          ${history.length ? `<button class="ghost" style="margin-bottom:4px" onclick='showCustomerHistory(${JSON.stringify(b.chatId)})'>👤 السجل (${history.length})</button><br>` : ""}
+          <button class="ghost" onclick='unbanUser(${JSON.stringify(b.chatId)})'>✅ رفع الحظر</button>
+        </td>
+      </tr>`;
+    }).join("");
 }
 
 async function unbanUser(chatId) {
