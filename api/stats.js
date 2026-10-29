@@ -88,9 +88,10 @@ export async function maybeExpireQuestions(now = Date.now()) {
   return closeExpiredQuestions(now);
 }
 
-export async function pushQuestion(text, chatId, customerName = "") {
+export async function pushQuestion(text, chatId, customerName = "", attachments = []) {
   await redis(["LPUSH", "questions", JSON.stringify({
     id: randomUUID(), t: Date.now(), q: String(text).slice(0, 500), chatId: String(chatId), customerName: String(customerName).slice(0, 150), status: "open",
+    attachments: Array.isArray(attachments) ? attachments.slice(0, 5) : [],
   })]);
   if (Math.random() < 0.05) await redis(["LTRIM", "questions", 0, 499]);
 }

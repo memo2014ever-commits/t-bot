@@ -5,7 +5,38 @@ import {
 } from "./stats.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
+const IMGBB_API_KEY = process.env.IMGBB_API_KEY;
 const bot = new Bot(process.env.BOT_TOKEN);
+
+async function uploadToImgBB(fileId) {
+  try {
+    const fileInfo = await bot.api.getFile(fileId);
+    const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${fileInfo.file_path}`;
+    const fileRes = await fetch(fileUrl);
+    const buffer = await fileRes.arrayBuffer();
+    const base64 = Buffer.from(buffer).toString("base64");
+    const form = new URLSearchParams();
+    form.append("key", IMGBB_API_KEY);
+    form.append("image", base64);
+    const res = await fetch("https://api.imgbb.com/1/upload", { method: "POST", body: form });
+    const j = await res.json();
+    return j?.data?.url || null;
+  } catch { return null; }
+}
+
+async function extractAttachments(msg) {
+  if (!IMGBB_API_KEY) return [];
+  const attachments = [];
+  if (msg.photo) {
+    const photo = msg.photo[msg.photo.length - 1];
+    const url = await uploadToImgBB(photo.file_id);
+    if (url) attachments.push({ type: "image", url });
+  } else if (msg.document && msg.document.mime_type?.startsWith("image/")) {
+    const url = await uploadToImgBB(msg.document.file_id);
+    if (url) attachments.push({ type: "image", url, name: msg.document.file_name });
+  }
+  return attachments;
+}
 
 const DEFAULT_CLOSED_AUTO = "🔒 تم إغلاق سؤالك تلقائيًا لعدم وجود متابعة خلال 24 ساعة.\n\nإذا كان لديك استفسار جديد، استخدم زر «ابعت سؤالك» 👇";
 async function notifyExpired(items, message = DEFAULT_CLOSED_AUTO) {
@@ -205,7 +236,7 @@ const SHORT_REPLIES = new Set([
 ].map((x) => norm(x)));
 
 // الرد على خانة السؤال: قصير؟ ← بحث ← (إجابة واحدة: يرد) (أكتر: تقصد + بديل) (مفيش: يسجل)
-async function handleAskReply(ctx, text, content, m, root) {
+async function handleAskReply(ctx, text, content, m, root, attachments = []) {
   const cleaned = norm(text);
   if (cleaned.length < 3 || SHORT_REPLIES.has(cleaned)) {
     return ctx.reply("اكتب سؤالك بشكل أوضح 👇", {
@@ -218,16 +249,16 @@ async function handleAskReply(ctx, text, content, m, root) {
     try { await setPending(ctx.chat.id, text); } catch {}
     return showChoices(ctx, hits, content, m, true);
   }
-  return saveAndThank(ctx, text, m, root);
+  return saveAndThank(ctx, text, m, root, attachments);
 }
 
 // تسجيل السؤال + الشكر + المتبقي من الحد
-async function saveAndThank(ctx, text, m, root) {
+async function saveAndThank(ctx, text, m, root, attachments = []) {
   let allowed = true;
   try { allowed = await questionAllowed(ctx.chat.id); } catch {}
   if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(root));
   const customerName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || (ctx.from?.username ? `@${ctx.from.username}` : "");
-  try { await pushQuestion(text, ctx.chat.id, customerName); } catch {}
+  try { await pushQuestion(text, ctx.chat.id, customerName, attachments); } catch {}
   const left = await questionsLeft(ctx.chat.id).catch(() => 0);
   const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
   return ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
@@ -299,41 +330,34 @@ async function showHit(ctx, hit) {
 }
 
 // الرسايل النصية: طبي؟ ← رد على خانة السؤال؟ ← بحث بالكلمات ← رد عام
-bot.on("message:text", async (ctx) => {
+async function handleMessage(ctx, text, msg) {
   try { if (await isBanned(ctx.chat.id)) return; } catch {}
   try { await trackActive(ctx.chat.id); } catch {}
   const content = await getContent().catch(() => ({}));
   const m = content.messages || {};
   try { await notifyExpired(await maybeExpireQuestions(), m.autoClosed || DEFAULT_CLOSED_AUTO); } catch {}
-  const text = ctx.message.text || "";
   const root = render(content, "").markup;
 
-  // Reply على رسالة إجابة الإدارة = متابعة مؤقتة لنفس السؤال، وليس سؤالًا جديدًا.
-  const repliedMessageId = ctx.message.reply_to_message?.message_id;
-  if (ctx.message.reply_to_message?.from?.is_bot && repliedMessageId) {
+  const repliedMessageId = msg.reply_to_message?.message_id;
+  if (msg.reply_to_message?.from?.is_bot && repliedMessageId) {
     const parent = await questionForReply(ctx.chat.id, repliedMessageId).catch(() => null);
     if (parent) {
       const followup = await addFollowup(parent.id, text).catch(() => null);
-      if (followup?.limitReached) {
-        return ctx.reply(m.followupLimit || DEFAULT_FOLLOWUP_LIMIT, HTML_OPTS(root));
-      }
+      if (followup?.limitReached) return ctx.reply(m.followupLimit || DEFAULT_FOLLOWUP_LIMIT, HTML_OPTS(root));
       if (followup) return ctx.reply(m.followupReceived || DEFAULT_FOLLOWUP_RECEIVED, HTML_OPTS(root));
     }
   }
 
-  // الإجابة القديمة أو المنتهية ليست محادثة مفتوحة؛ السؤال الجديد يبدأ من زر الأسئلة.
-  const repliedText = ctx.message.reply_to_message?.text || "";
-  if (ctx.message.reply_to_message?.from?.is_bot && repliedText.startsWith("📩 رد على سؤالك:")) {
+  const repliedText = msg.reply_to_message?.text || "";
+  if (msg.reply_to_message?.from?.is_bot && repliedText.startsWith("📩 رد على سؤالك:")) {
     return ctx.reply("لو عندك سؤال جديد، اضغط على زر «ابعت سؤالك» واكتبه هناك 👇", HTML_OPTS(root));
   }
 
-  // 1) السؤال الطبي: يتحوّل للخط الساخن
-  if (hasMedical(text, content.medicalKeywords)) {
+  if (text && hasMedical(text, content.medicalKeywords)) {
     return ctx.reply(toHtml(m.medical || DEFAULT_MEDICAL), HTML_OPTS(root));
   }
 
-  // 1.5) استعلام عن حجز أو موعد: رسالة واحدة، وزرار اختياري يتحدد من اللوحة
-  if (hasInquiry(text, content.inquiryKeywords)) {
+  if (text && hasInquiry(text, content.inquiryKeywords)) {
     const btnText = (m.inquiryButtonText || "").trim();
     const btnUrl = (m.inquiryButtonUrl || "").trim();
     const validUrl = /^https:\/\/\S+$/.test(btnUrl);
@@ -341,24 +365,30 @@ bot.on("message:text", async (ctx) => {
     return ctx.reply(toHtml(m.inquiry || DEFAULT_INQUIRY), HTML_OPTS(kb));
   }
 
-  // رد على خانة "اكتب سؤالك": البحث الأول، ومفيش حفظ إلا لو مفيش إجابة
-  const r = ctx.message.reply_to_message;
+  const r = msg.reply_to_message;
   const rText = (r && r.text) || "";
   const prompt = m.askPrompt || DEFAULT_PROMPT;
   const isAskPrompt = rText === prompt || rText.startsWith("اكتب سؤالك") || rText.startsWith("مش واضح إنه سؤال");
-  if (r && r.from?.is_bot && isAskPrompt) return handleAskReply(ctx, text, content, m, root);
+  if (r && r.from?.is_bot && isAskPrompt) {
+    const attachments = await extractAttachments(msg);
+    return handleAskReply(ctx, text || "📎 مرفق", content, m, root, attachments);
+  }
 
-  // بحث عادي في المحتوى (من غير تسجيل أي سؤال)
+  if (!text) return ctx.reply(toHtml(m.fallback || DEFAULT_FALLBACK), HTML_OPTS(root));
+
   const hits = searchNodes(content, text);
   if (hits.length === 1) return showHit(ctx, hits[0]);
   if (hits.length > 1) return showChoices(ctx, hits, content, m, false);
 
-  // 4) مفيش تطابق: نسجل الكلمات اللي ما اتطابقتش (بدون أرقام)، ورد عام مع القايمة
   try {
     const words = distinctTokens(text).filter((w) => !/\d/.test(w));
     if (words.length) await trackUnmatched(words);
   } catch {}
   return ctx.reply(toHtml(m.fallback || DEFAULT_FALLBACK), HTML_OPTS(root));
-});
+}
+
+bot.on("message:text", (ctx) => handleMessage(ctx, ctx.message.text || "", ctx.message));
+bot.on("message:photo", (ctx) => handleMessage(ctx, ctx.message.caption || "", ctx.message));
+bot.on("message:document", (ctx) => handleMessage(ctx, ctx.message.caption || "", ctx.message));
 
 export default webhookCallback(bot, "https");
