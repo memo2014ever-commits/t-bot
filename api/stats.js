@@ -81,7 +81,19 @@ export async function takePending(chatId) {
   return v;
 }
 
-// فحص المهلة مرة كل ساعة بس (قفل زمني) بدل كل رسالة
+// صورة معلّقة لمدة 10 دقايق لحد ما العميل يكتب السؤال
+function pendImgKey(chatId) {
+  return "pendimg:" + createHash("sha256").update(String(chatId)).digest("hex").slice(0, 16);
+}
+export async function setPendingImage(chatId, url) {
+  await redis(["SET", pendImgKey(chatId), String(url), "EX", 600]);
+}
+export async function takePendingImage(chatId) {
+  const k = pendImgKey(chatId);
+  const v = await redis(["GET", k]);
+  if (v) await redis(["DEL", k]);
+  return v;
+}
 export async function maybeExpireQuestions(now = Date.now()) {
   const ok = await redis(["SET", "expiry:lock", "1", "NX", "EX", 3600]);
   if (ok !== "OK") return [];

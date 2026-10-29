@@ -1,7 +1,7 @@
 // بوت تلجرام: قايمة + رجوع + روابط + زرار سؤال + بحث بالكلمات + تحويل الطبي للخط الساخن
 import { Bot, InlineKeyboard, webhookCallback } from "grammy";
 import {
-  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, questionForReply, addFollowup, closeExpiredQuestions, maybeExpireQuestions, setPending, takePending, isBanned,
+  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, questionForReply, addFollowup, closeExpiredQuestions, maybeExpireQuestions, setPending, takePending, isBanned, setPendingImage, takePendingImage,
 } from "./stats.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
@@ -258,7 +258,15 @@ async function saveAndThank(ctx, text, m, root, attachments = []) {
   try { allowed = await questionAllowed(ctx.chat.id); } catch {}
   if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(root));
   const customerName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || (ctx.from?.username ? `@${ctx.from.username}` : "");
-  try { await pushQuestion(text, ctx.chat.id, customerName, attachments); } catch {}
+  // لو مفيش مرفق جاي مع السؤال، نشوف لو في صورة معلقة من قبل
+  let finalAttachments = attachments;
+  if (!finalAttachments.length) {
+    try {
+      const pendUrl = await takePendingImage(ctx.chat.id);
+      if (pendUrl) finalAttachments = [{ type: "image", url: pendUrl }];
+    } catch {}
+  }
+  try { await pushQuestion(text, ctx.chat.id, customerName, finalAttachments); } catch {}
   const left = await questionsLeft(ctx.chat.id).catch(() => 0);
   const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
   return ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
@@ -371,7 +379,21 @@ async function handleMessage(ctx, text, msg) {
   const isAskPrompt = rText === prompt || rText.startsWith("اكتب سؤالك") || rText.startsWith("مش واضح إنه سؤال");
   if (r && r.from?.is_bot && isAskPrompt) {
     const attachments = await extractAttachments(msg);
-    return handleAskReply(ctx, text || "📎 مرفق", content, m, root, attachments);
+    const finalText = text || (attachments.length ? "📎 مرفق" : "");
+    if (!finalText) return ctx.reply("اكتب سؤالك أو أرسل صورة 👇", { reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." } });
+    return handleAskReply(ctx, finalText, content, m, root, attachments);
+  }
+
+  // صورة بدون reply: نرفعها لـ ImgBB ونحتفظ بالرابط مؤقتاً، ونطلب منه يكتب سؤاله
+  if (!text && (msg.photo || msg.document)) {
+    const url = await uploadToImgBB(msg.photo ? msg.photo[msg.photo.length - 1].file_id : msg.document.file_id).catch(() => null);
+    if (url) {
+      try { await setPendingImage(ctx.chat.id, url); } catch {}
+      return ctx.reply("تم استلام الصورة 🖼️\nدلوقتي اكتب سؤالك وهتتبعت الصورة معاه 👇", {
+        reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
+      });
+    }
+    return ctx.reply(toHtml(m.fallback || DEFAULT_FALLBACK), HTML_OPTS(root));
   }
 
   if (!text) return ctx.reply(toHtml(m.fallback || DEFAULT_FALLBACK), HTML_OPTS(root));
