@@ -1,7 +1,7 @@
 // خادم لوحة التحكم: تسجيل دخول بدورين (أدمن / محرر)، وقراءة وحفظ وسجل نسخ من GitHub
 // كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
-import { timingSafeEqual } from "crypto";
-import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched, banUser, unbanUser, getBans, getBanInfo } from "./stats.js";
+import { timingSafeEqual, createHash } from "crypto";
+import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched, banUser, unbanUser, getBans, getBanInfo, redis } from "./stats.js";
 
 const {
   ADMIN_USER, ADMIN_PASS,          // الأدمن: يعدّل ويحذف
@@ -167,6 +167,14 @@ export default async function handler(req, res) {
 
     if (action === "clearunmatched") {
       await clearUnmatched();
+      return res.json({ ok: true });
+    }
+
+    if (action === "resetQuestionLimit") {
+      if (role !== "admin") return res.status(403).json({ error: "للأدمن بس" });
+      if (typeof ref !== "string" || !/^\d+$/.test(ref.trim())) return res.status(400).json({ error: "معرف العميل غير صحيح" });
+      const key = `qrate:${createHash("sha256").update(ref.trim()).digest("hex").slice(0, 16)}`;
+      await redis(["DEL", key]);
       return res.json({ ok: true });
     }
 
