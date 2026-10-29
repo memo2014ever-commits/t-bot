@@ -159,6 +159,7 @@
       <button class="tab" data-tab="archive" onclick="showTab('archive')">🗄️ الأرشيف</button>
       <button class="tab" data-tab="presslog" onclick="showTab('presslog')">🧾 سجل الضغطات</button>
       <button class="tab" data-tab="history" onclick="showTab('history')">🕘 النسخ السابقة</button>
+      <button class="tab" data-tab="bans" onclick="showTab('bans')">🚫 المحظورون</button>
       <button class="tab" data-tab="help" onclick="showTab('help')">💡 مساعدة</button>
     </nav>
 
@@ -262,6 +263,16 @@
       </div>
       <div class="card" style="padding:0;overflow:auto"><table id="historyTable"></table></div>
       <p class="muted">"استرجاع" بيحط النسخة دي في المحرر، وبعدين تضغط حفظ عشان تتثبت.</p>
+    </div>
+
+    <!-- المحظورون -->
+    <div id="tab-bans" class="hidden">
+      <div class="row" style="margin-bottom:12px">
+        <h2 style="margin:0">🚫 العملاء المحظورون</h2>
+        <button class="ghost" onclick="loadBans()">🔄 تحديث</button>
+      </div>
+      <div class="card" style="padding:0;overflow:auto"><table id="bansTable"></table></div>
+      <p class="muted">العملاء المحظورون لا يتلقون أي رد من البوت. الحظر للأدمن فقط.</p>
     </div>
 
     <!-- المساعدة -->
@@ -413,12 +424,13 @@ function dropDraft() {
 // ---------- التنقل ----------
 function showTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  ["stats", "menu", "questions", "archive", "presslog", "history", "help"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
+  ["stats", "menu", "questions", "archive", "presslog", "history", "bans", "help"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
   if (name === "stats") loadStats();
   if (name === "questions") loadQuestions();
   if (name === "archive") loadQuestions();
   if (name === "presslog") loadPressLog();
   if (name === "history") loadHistory();
+  if (name === "bans") loadBans();
 }
 
 // ---------- الشجرة: مسارات وأسماء ----------
@@ -1338,7 +1350,7 @@ function renderQuestions() {
       <td style="min-width:280px">
         ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">المتابعات: ${x.followups?.length || 0}/3<br>${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>💾 حفظ وإرسال التعديل</button></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد<br><button class="ghost" style="margin-top:6px" onclick='showFollowup(${JSON.stringify(x.id)})'>📩 عرض متابعة العميل</button><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال الرد</button>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
       </td>
-      <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}<button class="ghost" style="margin-bottom:6px" onclick='closeQuestionFromPanel(${JSON.stringify(x.id)})'>🔒 إغلاق</button><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
+      <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}<button class="ghost" style="margin-bottom:6px" onclick='closeQuestionFromPanel(${JSON.stringify(x.id)})'>🔒 إغلاق</button>${x.chatId && role === "admin" ? `<button class="danger" style="margin-bottom:6px" onclick='openBanDialog(${JSON.stringify(x.chatId)}, ${JSON.stringify(x.customerName || "")})'>🚫 حظر</button>` : ""}<button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
     </tr>`).join("");
 }
 
@@ -1712,6 +1724,85 @@ async function loadHistory() {
   } catch (e) {
     t.innerHTML = `<tr><td style="color:var(--bad)">${esc(e.message)}</td></tr>`;
   }
+}
+
+// ---------- نظام الحظر ----------
+let bansCache = [];
+
+async function loadBans() {
+  const t = $("bansTable");
+  t.innerHTML = '<tr><td class="muted">جاري التحميل...</td></tr>';
+  try {
+    bansCache = (await api("getBans")).bans;
+    renderBans();
+  } catch (e) { t.innerHTML = `<tr><td style="color:var(--bad)">${esc(e.message)}</td></tr>`; }
+}
+
+function renderBans() {
+  const t = $("bansTable");
+  if (!bansCache.length) { t.innerHTML = '<tr><td class="muted">مفيش عملاء محظورون</td></tr>'; return; }
+  t.innerHTML = `<tr><th>معرّف العميل</th><th>السبب</th><th>تاريخ الحظر</th><th>بواسطة</th><th></th></tr>` +
+    bansCache.map((b) => `<tr>
+      <td>${esc(b.chatId)}</td>
+      <td>${esc(b.reason || "—")}</td>
+      <td>${fmtTime(Number(b.bannedAt))}</td>
+      <td>${esc(b.bannedBy || "—")}</td>
+      <td><button class="ghost" onclick='unbanUser(${JSON.stringify(b.chatId)})'>✅ رفع الحظر</button></td>
+    </tr>`).join("");
+}
+
+async function unbanUser(chatId) {
+  const ok = await confirmBox(`رفع الحظر عن العميل ${chatId}؟`, "رفع الحظر", false);
+  if (!ok) return;
+  try {
+    await api("unbanUser", { ref: chatId });
+    bansCache = bansCache.filter((b) => b.chatId !== chatId);
+    renderBans();
+    toast("تم رفع الحظر", "ok");
+  } catch (e) { toast(e.message, "bad"); }
+}
+
+const BAN_REASONS = [
+  "إساءة أو ألفاظ غير لائقة",
+  "إرسال محتوى مخالف",
+  "تكرار الأسئلة بشكل مزعج",
+  "محاولة اختراق أو استغلال",
+  "سبب آخر",
+];
+
+function openBanDialog(chatId, customerName) {
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  const box = document.createElement("div");
+  box.className = "modal";
+  box.innerHTML = `
+    <h2 style="margin:0 0 10px">🚫 حظر العميل</h2>
+    <p class="muted">العميل: <b>${esc(customerName || chatId)}</b><br>المعرّف: ${esc(chatId)}</p>
+    <label class="f">سبب الحظر</label>
+    <select id="banReasonSel" style="width:100%;padding:9px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit">
+      ${BAN_REASONS.map((r) => `<option>${esc(r)}</option>`).join("")}
+    </select>
+    <label class="f">سبب مخصص (اختياري، يستبدل الاختيار أعلاه)</label>
+    <input id="banReasonCustom" placeholder="اكتب السبب هنا..." maxlength="300">
+    <div class="row" style="margin-top:14px">
+      <button class="danger" id="banConfirmBtn">🚫 تأكيد الحظر</button>
+      <button class="ghost" id="banCancelBtn">إلغاء</button>
+    </div>`;
+  bg.appendChild(box);
+  document.body.appendChild(bg);
+  box.querySelector("#banCancelBtn").onclick = () => bg.remove();
+  bg.addEventListener("click", (e) => { if (e.target === bg) bg.remove(); });
+  box.querySelector("#banConfirmBtn").onclick = async () => {
+    const custom = box.querySelector("#banReasonCustom").value.trim();
+    const selected = box.querySelector("#banReasonSel").value;
+    const reason = custom || selected;
+    try {
+      await api("banUser", { ref: chatId, message: reason });
+      bg.remove();
+      toast(`تم حظر العميل: ${reason}`, "ok");
+      if (!$("tab-bans").classList.contains("hidden")) loadBans();
+    } catch (e) { toast(e.message, "bad"); }
+  };
 }
 
 async function restoreVersion(sha) {
