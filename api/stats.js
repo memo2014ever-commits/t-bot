@@ -172,7 +172,7 @@ export async function questionForReply(chatId, messageId, now = Date.now()) {
   return null;
 }
 
-export async function addFollowup(ref, text, now = Date.now()) {
+export async function addFollowup(ref, text, attachments = [], now = Date.now()) {
   const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
   const index = raw.findIndex((r) => {
     try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
@@ -185,7 +185,7 @@ export async function addFollowup(ref, text, now = Date.now()) {
     ...item,
     status: "followup_pending",
     lastActivityAt: now,
-    followups: [...followups, { t: now, text: String(text).slice(0, 1000) }],
+    followups: [...followups, { t: now, text: String(text).slice(0, 1000), attachments: Array.isArray(attachments) ? attachments.slice(0, 5) : [] }],
   };
   const result = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
   return result === null ? null : { ...updated, raw: JSON.stringify(updated) };

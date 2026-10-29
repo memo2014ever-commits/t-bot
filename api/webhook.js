@@ -10,9 +10,12 @@ const bot = new Bot(process.env.BOT_TOKEN);
 
 async function uploadToImgBB(fileId) {
   try {
+    if (!IMGBB_API_KEY) { console.error("[ImgBB] IMGBB_API_KEY missing"); return null; }
     const fileInfo = await bot.api.getFile(fileId);
+    if (!fileInfo?.file_path) { console.error("[ImgBB] no file_path"); return null; }
     const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${fileInfo.file_path}`;
     const fileRes = await fetch(fileUrl);
+    if (!fileRes.ok) { console.error("[ImgBB] fetch file failed", fileRes.status); return null; }
     const buffer = await fileRes.arrayBuffer();
     const base64 = Buffer.from(buffer).toString("base64");
     const form = new URLSearchParams();
@@ -20,8 +23,9 @@ async function uploadToImgBB(fileId) {
     form.append("image", base64);
     const res = await fetch("https://api.imgbb.com/1/upload", { method: "POST", body: form });
     const j = await res.json();
-    return j?.data?.url || null;
-  } catch { return null; }
+    if (!j?.data?.url) { console.error("[ImgBB] upload failed", JSON.stringify(j)); return null; }
+    return j.data.url;
+  } catch (e) { console.error("[ImgBB] exception", e?.message); return null; }
 }
 
 async function extractAttachments(msg) {
@@ -350,7 +354,10 @@ async function handleMessage(ctx, text, msg) {
   if (msg.reply_to_message?.from?.is_bot && repliedMessageId) {
     const parent = await questionForReply(ctx.chat.id, repliedMessageId).catch(() => null);
     if (parent) {
-      const followup = await addFollowup(parent.id, text).catch(() => null);
+      const attachments = await extractAttachments(msg);
+      const followupText = text || (attachments.length ? "📎 مرفق" : "");
+      if (!followupText) return ctx.reply(m.followupLimit || DEFAULT_FOLLOWUP_LIMIT, HTML_OPTS(root));
+      const followup = await addFollowup(parent.id, followupText, attachments).catch(() => null);
       if (followup?.limitReached) return ctx.reply(m.followupLimit || DEFAULT_FOLLOWUP_LIMIT, HTML_OPTS(root));
       if (followup) return ctx.reply(m.followupReceived || DEFAULT_FOLLOWUP_RECEIVED, HTML_OPTS(root));
     }
