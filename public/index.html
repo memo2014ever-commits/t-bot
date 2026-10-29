@@ -1338,20 +1338,39 @@ function renderQuestions() {
       <td>${counts[normQ(x.q)] > 1 ? `<span class="chip">${counts[normQ(x.q)]}</span>` : "1"}</td>
       <td>${fmtTime(x.t)}</td>
       <td style="min-width:280px">
-        ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">المتابعات: ${x.followups?.length || 0}/3<br>${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>💾 حفظ وإرسال التعديل</button></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد<br><button class="ghost" style="margin-top:6px" onclick='showFollowup(${JSON.stringify(x.id)})'>📩 عرض متابعة العميل</button><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال الرد</button>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><button class="ok" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال للعميل</button>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
+        ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">المتابعات: ${x.followups?.length || 0}/3<br>${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><div style="margin-top:4px;display:flex;gap:6px;align-items:center"><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" style="font-size:12px;flex:1"><button class="ok" style="margin-top:0" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد<br><button class="ghost" style="margin-top:6px" onclick='showFollowup(${JSON.stringify(x.id)})'>📩 عرض متابعة العميل</button><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><div style="margin-top:4px;display:flex;gap:6px;align-items:center"><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" style="font-size:12px;flex:1"><button class="ok" style="margin-top:0" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><div style="margin-top:4px;display:flex;gap:6px;align-items:center"><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" style="font-size:12px;flex:1"><button class="ok" style="margin-top:0" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
       </td>
       <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}<button class="ghost" style="margin-bottom:6px" onclick='closeQuestionFromPanel(${JSON.stringify(x.id)})'>🔒 إغلاق</button>${x.chatId && role === "admin" ? `<button class="danger" style="margin-bottom:6px" onclick='openBanDialog(${JSON.stringify(x.chatId)}, ${JSON.stringify(x.customerName || "")})'>🚫 حظر</button>` : ""}<button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
     </tr>`).join("");
+}
+
+async function uploadImageToImgBB(file) {
+  const b64 = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(",")[1]);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+  const result = await api("uploadImage", { image: b64 });
+  if (!result.url) throw new Error(result.error || "فشل رفع الصورة");
+  return result.url;
 }
 
 async function sendAnswer(id, savedAnswer = "") {
   const input = document.getElementById(`answer-${id}`);
   const answer = (savedAnswer || input?.value || "").trim();
   if (!answer) return toast("اكتب الإجابة أولاً", "bad");
-  const ok = await confirmBox(savedAnswer ? "هتتعاد الإجابة للعميل صاحب السؤال فقط. متأكد؟" : "هتتبعت الإجابة للعميل صاحب السؤال فقط. متأكد؟", savedAnswer ? "إعادة الإرسال" : "تم الإرسال", false);
+  const imgInput = document.getElementById(`answer-img-${id}`);
+  const file = imgInput?.files?.[0];
+  let imageUrl = null;
+  if (file) {
+    try { imageUrl = await uploadImageToImgBB(file); }
+    catch (e) { return toast(e.message, "bad"); }
+  }
+  const ok = await confirmBox("هتتبعت الإجابة للعميل صاحب السؤال فقط. متأكد؟", "تم الإرسال", false);
   if (!ok) return;
   try {
-    const result = await api("answerQuestion", { ref: id, answer });
+    const result = await api("answerQuestion", { ref: id, answer, imageUrl });
     const item = questionsCache.find((x) => x.id === id);
     if (item) { item.answer = answer; item.status = result.question?.status || "awaiting_followup"; item.answeredAt = result.question?.answeredAt || Date.now(); item.followupUntil = result.question?.followupUntil || item.followupUntil; item.answerHistory = result.question?.answerHistory || item.answerHistory; item.raw = result.question?.raw || item.raw; }
     renderQuestions();
