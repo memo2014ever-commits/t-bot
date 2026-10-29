@@ -1743,16 +1743,17 @@ function renderBans() {
     return matchQ && (!from || day >= from) && (!to || day <= to);
   });
   if (!rows.length) { t.innerHTML = `<tr><td class="muted" colspan="5">${bansCache.length ? "لا توجد نتائج للفلتر الحالي" : "مفيش عملاء محظورون"}</td></tr>`; return; }
-  t.innerHTML = `<tr><th>العميل</th><th>السبب</th><th>تاريخ الحظر</th><th>بواسطة</th><th></th></tr>` +
+  t.innerHTML = `<tr><th>اسم العميل</th><th>معرف العميل</th><th>السبب</th><th>تاريخ الحظر</th><th>بواسطة</th><th></th></tr>` +
     rows.map((b) => {
       const history = customerQuestions(b.chatId);
-      const name = history.find((x) => x.customerName)?.customerName || "";
+      const name = history.find((x) => x.customerName)?.customerName || "—";
       return `<tr>
-        <td><div>${esc(b.chatId)}</div>${name ? `<div class="muted">${esc(name)}</div>` : ""}</td>
+        <td>${esc(name)}</td>
+        <td class="muted">${esc(b.chatId)}</td>
         <td>${esc(b.reason || "—")}</td>
         <td>${fmtTime(Number(b.bannedAt))}</td>
         <td>${esc(b.bannedBy || "—")}</td>
-        <td><div class="row" style="gap:6px;flex-wrap:nowrap">
+        <td><div style="display:flex;gap:6px;align-items:center">
           ${history.length ? `<button class="ghost" onclick='showCustomerHistory(${JSON.stringify(b.chatId)})'>👤 السجل (${history.length})</button>` : ""}
           <button class="ghost" onclick='unbanUser(${JSON.stringify(b.chatId)})'>✅ رفع الحظر</button>
         </div></td>
