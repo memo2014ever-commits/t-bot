@@ -59,14 +59,25 @@ async function readCurrent(ref = GITHUB_BRANCH) {
   return { sha: j.sha, content: JSON.parse(Buffer.from(j.content, "base64").toString("utf8")) };
 }
 
-async function sendTelegram(chatId, answer, messages = {}, finalAnswer = false, followupCount = 0) {
+async function sendTelegram(chatId, answer, messages = {}, finalAnswer = false, followupCount = 0, imageUrl = null) {
   if (!BOT_TOKEN) throw new Error("BOT_TOKEN غير مضبوط على السيرفر");
-  const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text: `📩 رد على سؤالك:\n\n${answer}${finalAnswer ? "" : (followupCount > 0 ? `\n\n📩 المتابعة: ${followupCount}/3` : (messages.answerFooter || "\n\n📌 مسموح بحد أقصى 3 متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك»."))}`, ...(finalAnswer ? {} : { reply_markup: { force_reply: true, input_field_placeholder: messages.followupPlaceholder || "اكتب متابعة السؤال هنا..." } }) }),
-  });
-  const j = await r.json().catch(() => ({}));
+  const text = `📩 رد على سؤالك:\n\n${answer}${finalAnswer ? "" : (followupCount > 0 ? `\n\n📩 المتابعة: ${followupCount}/3` : (messages.answerFooter || "\n\n📌 مسموح بحد أقصى 3 متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك»."))}`;
+  const replyMarkup = finalAnswer ? {} : { reply_markup: { force_reply: true, input_field_placeholder: messages.followupPlaceholder || "اكتب متابعة السؤال هنا..." } };
+  let r, j;
+  if (imageUrl) {
+    r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, photo: imageUrl, caption: text, ...replyMarkup }),
+    });
+  } else {
+    r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text, ...replyMarkup }),
+    });
+  }
+  j = await r.json().catch(() => ({}));
   if (!r.ok || !j.ok) throw new Error(j.description || "فشل إرسال الإجابة إلى تيليجرام");
   return j.result;
 }
@@ -119,7 +130,8 @@ export default async function handler(req, res) {
       if (!question.chatId) return res.status(400).json({ error: "السؤال قديم ولا يحتوي على معرّف العميل" });
       const systemMessages = (await readCurrent()).content.messages || {};
       const followupCount = (question.followups || []).length;
-      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages, followupCount >= 3, followupCount);
+      const imageUrl = typeof req.body.imageUrl === "string" && /^https:\/\//.test(req.body.imageUrl) ? req.body.imageUrl : null;
+      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages, followupCount >= 3, followupCount, imageUrl);
       const updated = await answerQuestion(ref, answer.trim(), telegramMessage.message_id);
       if (!updated || updated.error) return res.status(500).json({ error: updated?.error || "فشل تحديث حالة السؤال" });
       if (updated.status === "archived") await sendCloseNotice(updated.chatId, false, systemMessages).catch(() => {});
@@ -168,6 +180,18 @@ export default async function handler(req, res) {
     if (action === "clearunmatched") {
       await clearUnmatched();
       return res.json({ ok: true });
+    }
+
+    if (action === "uploadImage") {
+      const { image } = req.body || {};
+      if (typeof image !== "string" || !image) return res.status(400).json({ error: "الصورة مطلوبة" });
+      const { IMGBB_API_KEY } = process.env;
+      if (!IMGBB_API_KEY) return res.status(500).json({ error: "IMGBB_API_KEY غير مضبوط" });
+      const form = new URLSearchParams({ key: IMGBB_API_KEY, image });
+      const r = await fetch("https://api.imgbb.com/1/upload", { method: "POST", body: form });
+      const j = await r.json().catch(() => ({}));
+      if (!j.success) return res.status(500).json({ error: j.error?.message || "فشل رفع الصورة" });
+      return res.json({ url: j.data.url });
     }
 
     if (action === "resetQuestionLimit") {
