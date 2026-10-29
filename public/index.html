@@ -270,7 +270,12 @@
         <h2 style="margin:0">🚫 العملاء المحظورون</h2>
         <button class="ghost" onclick="loadBans()">🔄 تحديث</button>
       </div>
-      <div class="toolbar"><input id="bansSearch" placeholder="🔍 ابحث بمعرف العميل أو السبب أو الموظف..." oninput="renderBans()"></div>
+      <div class="toolbar">
+        <input id="bansSearch" placeholder="🔍 ابحث بمعرف العميل أو الاسم أو السبب أو الموظف..." oninput="renderBans()" style="max-width:340px">
+        <label class="muted">من: <input id="bansFrom" type="date" onchange="renderBans()" style="width:auto"></label>
+        <label class="muted">إلى: <input id="bansTo" type="date" onchange="renderBans()" style="width:auto"></label>
+        <button class="ghost" onclick="clearBansFilters()">كل السجل</button>
+      </div>
       <div class="card" style="padding:0;overflow:auto"><table id="bansTable"></table></div>
       <p class="muted">العملاء المحظورون لا يتلقون أي رد من البوت. الحظر للأدمن فقط.</p>
     </div>
@@ -1719,25 +1724,38 @@ async function loadBans() {
   } catch (e) { t.innerHTML = `<tr><td style="color:var(--bad)">${esc(e.message)}</td></tr>`; }
 }
 
+function clearBansFilters() {
+  $("bansSearch").value = "";
+  $("bansFrom").value = "";
+  $("bansTo").value = "";
+  renderBans();
+}
+
 function renderBans() {
   const t = $("bansTable");
   const q = ($("bansSearch")?.value || "").trim().toLowerCase();
-  const rows = bansCache.filter((b) =>
-    !q || b.chatId.includes(q) || (b.reason || "").toLowerCase().includes(q) || (b.bannedBy || "").toLowerCase().includes(q)
-  );
-  if (!rows.length) { t.innerHTML = `<tr><td class="muted">${bansCache.length ? "لا توجد نتائج للبحث" : "مفيش عملاء محظورون"}</td></tr>`; return; }
-  t.innerHTML = `<tr><th>معرّف العميل</th><th>السبب</th><th>تاريخ الحظر</th><th>بواسطة</th><th></th></tr>` +
+  const from = $("bansFrom")?.value || "";
+  const to = $("bansTo")?.value || "";
+  const rows = bansCache.filter((b) => {
+    const name = (customerQuestions(b.chatId).find((x) => x.customerName)?.customerName || "").toLowerCase();
+    const matchQ = !q || b.chatId.includes(q) || name.includes(q) || (b.reason || "").toLowerCase().includes(q) || (b.bannedBy || "").toLowerCase().includes(q);
+    const day = cairoDate(Number(b.bannedAt));
+    return matchQ && (!from || day >= from) && (!to || day <= to);
+  });
+  if (!rows.length) { t.innerHTML = `<tr><td class="muted" colspan="5">${bansCache.length ? "لا توجد نتائج للفلتر الحالي" : "مفيش عملاء محظورون"}</td></tr>`; return; }
+  t.innerHTML = `<tr><th>العميل</th><th>السبب</th><th>تاريخ الحظر</th><th>بواسطة</th><th></th></tr>` +
     rows.map((b) => {
       const history = customerQuestions(b.chatId);
+      const name = history.find((x) => x.customerName)?.customerName || "";
       return `<tr>
-        <td>${esc(b.chatId)}</td>
+        <td><div>${esc(b.chatId)}</div>${name ? `<div class="muted">${esc(name)}</div>` : ""}</td>
         <td>${esc(b.reason || "—")}</td>
         <td>${fmtTime(Number(b.bannedAt))}</td>
         <td>${esc(b.bannedBy || "—")}</td>
-        <td style="white-space:nowrap">
-          ${history.length ? `<button class="ghost" style="margin-bottom:4px" onclick='showCustomerHistory(${JSON.stringify(b.chatId)})'>👤 السجل (${history.length})</button><br>` : ""}
+        <td><div class="row" style="gap:6px;flex-wrap:nowrap">
+          ${history.length ? `<button class="ghost" onclick='showCustomerHistory(${JSON.stringify(b.chatId)})'>👤 السجل (${history.length})</button>` : ""}
           <button class="ghost" onclick='unbanUser(${JSON.stringify(b.chatId)})'>✅ رفع الحظر</button>
-        </td>
+        </div></td>
       </tr>`;
     }).join("");
 }
