@@ -1,7 +1,7 @@
 // بوت تلجرام: قايمة + رجوع + روابط + زرار سؤال + بحث بالكلمات + تحويل الطبي للخط الساخن
 import { Bot, InlineKeyboard, webhookCallback } from "grammy";
 import {
-  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, questionForReply, addFollowup, closeExpiredQuestions, maybeExpireQuestions, setPending, takePending,
+  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, questionForReply, addFollowup, closeExpiredQuestions, maybeExpireQuestions, setPending, takePending, isBanned,
 } from "./stats.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
@@ -175,12 +175,14 @@ const HTML_OPTS = (markup) => ({
 });
 
 bot.command("start", async (ctx) => {
+  try { if (await isBanned(ctx.chat.id)) return; } catch {}
   const { text, markup } = render(await getContent(), "");
   await ctx.reply(toHtml(text), HTML_OPTS(markup));
   try { await trackVisitor(ctx.chat.id, ctx.match || ""); } catch {}
 });
 
 async function showNode(ctx, path, track) {
+  try { if (await isBanned(ctx.chat.id)) { await ctx.answerCallbackQuery(); return; } } catch {}
   try {
     try { await trackActive(ctx.chat.id); } catch {}
     const node = getNode(await getContent(), path);
@@ -247,6 +249,7 @@ async function showChoices(ctx, hits, content, m, withSendAnyway) {
 // العميل قال "ده مش قصدي": نسجل السؤال المعلّق
 bot.callbackQuery("pq", async (ctx) => {
   await ctx.answerCallbackQuery();
+  try { if (await isBanned(ctx.chat.id)) return; } catch {}
   let text = null;
   try { text = await takePending(ctx.chat.id); } catch {}
   const content = await getContent().catch(() => ({}));
@@ -262,6 +265,7 @@ bot.callbackQuery("pq", async (ctx) => {
 bot.callbackQuery(/^ask:(.*)$/, async (ctx) => {
   const path = ctx.match[1];
   try {
+    try { if (await isBanned(ctx.chat.id)) { await ctx.answerCallbackQuery(); return; } } catch {}
     try { await trackActive(ctx.chat.id); } catch {}
     const content = await getContent();
     const node = getNode(content, path);
@@ -296,6 +300,7 @@ async function showHit(ctx, hit) {
 
 // الرسايل النصية: طبي؟ ← رد على خانة السؤال؟ ← بحث بالكلمات ← رد عام
 bot.on("message:text", async (ctx) => {
+  try { if (await isBanned(ctx.chat.id)) return; } catch {}
   try { await trackActive(ctx.chat.id); } catch {}
   const content = await getContent().catch(() => ({}));
   const m = content.messages || {};

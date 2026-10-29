@@ -305,3 +305,41 @@ export async function resetStats() {
 
 function sum(o) { return Object.values(o).reduce((a, b) => a + b, 0); }
 function toObj(arr) { const o = {}; for (let i = 0; i < (arr?.length || 0); i += 2) o[arr[i]] = Number(arr[i + 1]); return o; }
+
+// ==================== نظام الحظر ====================
+function banKey(chatId) {
+  return "ban:" + createHash("sha256").update(String(chatId)).digest("hex").slice(0, 16);
+}
+
+export async function banUser(chatId, reason, bannedBy) {
+  const key = banKey(chatId);
+  await redis(["HSET", key, "chatId", String(chatId), "reason", String(reason).slice(0, 300), "bannedAt", Date.now(), "bannedBy", String(bannedBy).slice(0, 50)]);
+  await redis(["SADD", "bans:set", String(chatId)]);
+}
+
+export async function unbanUser(chatId) {
+  await redis(["DEL", banKey(chatId)]);
+  await redis(["SREM", "bans:set", String(chatId)]);
+}
+
+export async function isBanned(chatId) {
+  const v = await redis(["HGET", banKey(chatId), "bannedAt"]);
+  return v !== null;
+}
+
+export async function getBanInfo(chatId) {
+  const arr = await redis(["HGETALL", banKey(chatId)]);
+  if (!arr || !arr.length) return null;
+  const o = {};
+  for (let i = 0; i < arr.length; i += 2) o[arr[i]] = arr[i + 1];
+  return o;
+}
+
+export async function getBans() {
+  const ids = (await redis(["SMEMBERS", "bans:set"])) || [];
+  const list = await Promise.all(ids.map(async (id) => {
+    const info = await getBanInfo(id);
+    return info ? { ...info, chatId: id } : null;
+  }));
+  return list.filter(Boolean).sort((a, b) => Number(b.bannedAt) - Number(a.bannedAt));
+}

@@ -1,7 +1,7 @@
 // خادم لوحة التحكم: تسجيل دخول بدورين (أدمن / محرر)، وقراءة وحفظ وسجل نسخ من GitHub
 // كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
 import { timingSafeEqual } from "crypto";
-import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched } from "./stats.js";
+import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched, banUser, unbanUser, getBans, getBanInfo } from "./stats.js";
 
 const {
   ADMIN_USER, ADMIN_PASS,          // الأدمن: يعدّل ويحذف
@@ -168,6 +168,30 @@ export default async function handler(req, res) {
     if (action === "clearunmatched") {
       await clearUnmatched();
       return res.json({ ok: true });
+    }
+
+    if (action === "banUser") {
+      if (role !== "admin") return res.status(403).json({ error: "الحظر للأدمن بس" });
+      if (typeof ref !== "string" || !/^\d+$/.test(ref.trim())) return res.status(400).json({ error: "معرف العميل غير صحيح" });
+      const reason = typeof message === "string" && message.trim() ? message.trim().slice(0, 300) : "لم يُذكر سبب";
+      await banUser(ref.trim(), reason, username);
+      return res.json({ ok: true });
+    }
+
+    if (action === "unbanUser") {
+      if (role !== "admin") return res.status(403).json({ error: "رفع الحظر للأدمن بس" });
+      if (typeof ref !== "string" || !/^\d+$/.test(ref.trim())) return res.status(400).json({ error: "معرف العميل غير صحيح" });
+      await unbanUser(ref.trim());
+      return res.json({ ok: true });
+    }
+
+    if (action === "getBans") {
+      return res.json({ bans: await getBans() });
+    }
+
+    if (action === "getBanInfo") {
+      if (typeof ref !== "string" || !/^\d+$/.test(ref.trim())) return res.status(400).json({ error: "معرف العميل غير صحيح" });
+      return res.json({ ban: await getBanInfo(ref.trim()) });
     }
 
     if (action === "presslog") {
