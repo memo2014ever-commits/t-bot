@@ -208,6 +208,7 @@
         <div class="row" style="gap:6px">
           <button class="ghost" onclick="loadQuestions()">🔄 تحديث</button>
           <button class="ghost" onclick="exportQuestions()">📥 تصدير</button>
+          <button class="ghost" onclick="resetQuestionLimit()">🔓 فتح حد الأسئلة لمعرف</button>
         </div>
       </div>
       <div class="card" id="quickCard">
@@ -1470,6 +1471,15 @@ async function editAnswerHistory(id, answerIndex) {
     if (local) Object.assign(local, updated);
     renderQuestions(); renderArchive();
     toast("تم تعديل الإجابة وإعادة إرسالها", "ok");
+  } catch (e) { toast(e.message, "bad"); }
+}
+
+async function resetQuestionLimit() {
+  const chatId = prompt("اكتب معرف العميل (chatId):");
+  if (!chatId || !/^\d+$/.test(chatId.trim())) return toast("معرف غير صحيح", "bad");
+  try {
+    await api("resetQuestionLimit", { ref: chatId.trim() });
+    toast("تم فتح حد الأسئلة للعميل", "ok");
   } catch (e) { toast(e.message, "bad"); }
 }
 
