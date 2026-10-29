@@ -1150,7 +1150,10 @@ function showCustomerHistory(chatId) {
       <div style="white-space:pre-wrap">${esc(x.q)}</div>
       <div class="muted" style="margin-top:5px">${fmtTime(x.t)}</div>
       ${answerEntries(x).map((a, ai) => `<div style="margin-top:8px;padding:8px;background:var(--soft);border-radius:8px;white-space:pre-wrap"><b>الإجابة ${ai + 1}:</b>\n${esc(a.text || "")}<br><span class="muted">${fmtTime(a.t)}</span><br><button class="ghost" style="margin-top:5px" onclick='editAnswerHistory(${JSON.stringify(x.id)}, ${ai})'>📝 تعديل وإعادة إرسال هذه الإجابة</button></div>`).join("")}
-      ${(x.followups || []).map((f) => `<div style="margin-top:8px;padding:8px;border-right:3px solid var(--accent);white-space:pre-wrap"><b>متابعة العميل:</b>\n${esc(f.text)}<br><span class="muted">${fmtTime(f.t)}</span></div>`).join("")}
+      ${(x.followups || []).map((f) => {
+        const imgs = (f.attachments || []).map(a => `<br><a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" style="max-width:150px;max-height:110px;border-radius:8px;margin-top:4px;display:block"></a>`).join("");
+        return `<div style="margin-top:8px;padding:8px;border-right:3px solid var(--accent);white-space:pre-wrap"><b>متابعة العميل:</b>\n${esc(f.text)}${imgs}<br><span class="muted">${fmtTime(f.t)}</span></div>`;
+      }).join("")}
     </div>`).join("");
   modal(`<h2 style="margin:0 0 10px">👤 سجل أسئلة العميل</h2>
     <p class="muted">العميل: ${esc(customerName)}<br>عدد الأسئلة المسجلة لهذا العميل: ${items.length}</p>
@@ -1365,8 +1368,9 @@ function showFollowup(id) {
   const item = questionsCache.find((x) => x.id === id);
   const followup = item?.followups?.at(-1);
   if (!followup) return;
+  const imgs = (followup.attachments || []).map(a => `<br><a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" style="max-width:180px;max-height:140px;border-radius:8px;margin-top:6px;display:block"></a>`).join("");
   modal(`<h2 style="margin:0 0 10px">📩 متابعة العميل</h2>
-    <div class="card" style="white-space:pre-wrap;padding:12px">${esc(followup.text)}<br><span class="muted">${fmtTime(followup.t)}</span></div>
+    <div class="card" style="white-space:pre-wrap;padding:12px">${esc(followup.text)}${imgs}<br><span class="muted">${fmtTime(followup.t)}</span></div>
     <div class="row" style="margin-top:12px"><button class="ghost" data-r="0">إغلاق</button></div>`);
 }
 
@@ -1391,7 +1395,10 @@ function showConversation(id) {
   const item = questionsCache.find((x) => x.id === id);
   if (!item) return;
   const answers = answerEntries(item).map((a, i) => `<div class="card" style="margin:7px 0;padding:9px"><b>الإجابة ${i + 1}</b><br><span style="white-space:pre-wrap">${esc(a.text || "")}</span><br><span class="muted">${fmtTime(a.t)}</span><br><button class="ghost" style="margin-top:4px" onclick='editAnswerHistory(${JSON.stringify(id)}, ${i})'>📝 تعديل</button></div>`).join("");
-  const followups = (item.followups || []).map((f, i) => `<div class="card" style="margin:7px 0;padding:9px;border-right:3px solid var(--accent)"><b>متابعة ${i + 1}</b><br><span style="white-space:pre-wrap">${esc(f.text || "")}</span><br><span class="muted">${fmtTime(f.t)}</span></div>`).join("");
+  const followups = (item.followups || []).map((f, i) => {
+    const imgs = (f.attachments || []).map(a => `<br><a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" style="max-width:180px;max-height:140px;border-radius:8px;margin-top:6px;display:block"></a>`).join("");
+    return `<div class="card" style="margin:7px 0;padding:9px;border-right:3px solid var(--accent)"><b>متابعة ${i + 1}</b><br><span style="white-space:pre-wrap">${esc(f.text || "")}</span>${imgs}<br><span class="muted">${fmtTime(f.t)}</span></div>`;
+  }).join("");
   modal(`<h2 style="margin:0 0 8px">🗂️ محادثة السؤال</h2><div class="muted" style="white-space:pre-wrap">${esc(item.q)}</div><div style="max-height:60vh;overflow:auto;margin-top:8px">${answers}${followups}</div><div class="row" style="margin-top:10px"><button class="ghost" data-r="0">إغلاق</button></div>`);
 }
 
