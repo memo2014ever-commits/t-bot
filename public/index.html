@@ -1014,20 +1014,26 @@ function exportHours() {
   excelDownload(`أوقات_الذروة_${lastHoursDate || "الإجمالي"}.xls`, [["الساعة", "الضغطات"], ...Array.from({ length: 24 }, (_, h) => [`${h}:00`, Number(hrs[h] || 0)])]);
 }
 
-// نفس فلتر العرض: الزراير الموجودة بس
+// تجميع الضغطات باسم الزرار بدل مكانه (عشان الأرقام ما تضيعش لو الزراير اتحركت)
+// الزراير اللي اسمها مش موجود في القايمة خالص (محذوفة) ما بتظهرش
+function labelUsage(obj) {
+  const names = new Set(allNodes().map(({ node }) => node.label));
+  const out = {};
+  Object.entries(obj || {}).forEach(([k, v]) => {
+    const l = k.includes("|") ? k.split("|")[1] : k;
+    if (!l || !names.has(l)) return;
+    out[l] = (out[l] || 0) + Number(v || 0);
+  });
+  return out;
+}
+
 function currentUsed(st) {
-  return Object.fromEntries(Object.entries(st.pressByPath7d || {}).filter(([k]) => {
-    const [p, l] = k.split("|");
-    if (!l) return false;
-    const node = getNodeByPath(p);
-    return !!node && node.label === l;
-  }));
+  return labelUsage(st.pressByPath7d);
 }
 
 function unusedNodes(st) {
-  const used = currentUsed(st);
-  const usedPaths = Object.keys(used).map((k) => k.split("|")[0]);
-  return allNodes().filter(({ path }) => path !== "" && !usedPaths.includes(path));
+  const usedNames = Object.keys(currentUsed(st));
+  return allNodes().filter(({ path, node }) => path !== "" && !usedNames.includes(node.label));
 }
 
 function csvDownload(fileName, rows) {
@@ -1584,7 +1590,7 @@ function dailyChart(days) {
   return days.map((d) => `<div class="col"><div class="num">${d.presses}</div><div class="bar-v" style="height:${Math.max(3, (d.presses / maxD) * 100)}%"></div><div class="lbl">${d.date.slice(5)}</div></div>`).join("");
 }
 function usageRows(obj) {
-  const entries = Object.entries(obj || {}).filter(([k]) => k.includes("|"));
+  const entries = Object.entries(obj || {}).filter(([k]) => !!k);
   const max = Math.max(1, ...entries.map(([, v]) => Number(v)));
   if (!entries.length) return '<tr><td colspan="3" class="muted">لا يوجد نشاط في هذا النطاق</td></tr>';
   return entries.sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td>${esc(k.split("|")[1] || k)}</td><td>${v}</td><td style="width:35%"><div class="bar"><span style="width:${(v / max) * 100}%"></span></div></td></tr>`).join("");
@@ -1621,10 +1627,7 @@ async function loadDailyForDate(date) {
 async function loadButtonsForDate(date) {
   try {
     const obj = date ? (await api("statsDay", { ref: date })).byPath : lastStats?.pressByPath7d || {};
-    const used = Object.fromEntries(Object.entries(obj).filter(([k]) => {
-      const [p, l] = k.split("|"); const node = getNodeByPath(p);
-      return !!l && !!node && node.label === l;
-    }));
+    const used = labelUsage(obj);
     $("buttonsTable").innerHTML = `<tr><th>الزرار</th><th>الضغطات</th><th></th></tr>${usageRows(used)}`;
     $("buttonsMode").textContent = date ? `بيانات يوم ${date} فقط` : "أكتر الزراير استخدامًا خلال آخر 7 أيام";
   } catch (e) { toast(e.message, "bad"); }
@@ -1687,14 +1690,9 @@ async function loadStats() {
 
     // الأزرار اللي ما اتداستش خالص في 7 أيام
     // نعرض بس الزراير الموجودة فعلاً (المحذوف أو المتغير اسمه ما يظهرش)
-    const used = Object.fromEntries(Object.entries(st.pressByPath7d || {}).filter(([k]) => {
-      const [p, l] = k.split("|");
-      if (!l) return false;
-      const node = getNodeByPath(p);
-      return !!node && node.label === l;
-    }));
-    const usedPaths = Object.keys(used).map((k) => k.split("|")[0]);
-    const unused = allNodes().filter(({ path }) => path !== "" && !usedPaths.includes(path));
+    const used = labelUsage(st.pressByPath7d);
+    const usedNames = Object.keys(used);
+    const unused = allNodes().filter(({ path, node }) => path !== "" && !usedNames.includes(node.label));
     const unusedHtml = unused.length
       ? unused.map(({ path, node }) => `<span class="chip zero">${esc(node.label || "بدون اسم")}</span>`).join("")
       : '<span class="muted">كل الأزرار اتداست خلال آخر 7 أيام ✅</span>';
