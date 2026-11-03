@@ -1593,7 +1593,11 @@ function archiveRows() {
   const to = $("aTo")?.value || "";
   return questionsCache.filter((x) => {
     if (!["answered", "archived"].includes(x.status)) return false;
-    if (aFilter === "closed" && x.status !== "archived") return false;
+    if (aFilter && aFilter.startsWith("closed")) {
+      if (x.status !== "archived") return false;
+      const kind = aFilter.split(":")[1];
+      if (kind && closeKind(x) !== kind) return false;
+    }
     const day = cairoDate(x.t);
     const text = `${x.q || ""} ${x.answer || ""}`.toLowerCase();
     return (!q || text.includes(q) || custSearchMatch(x, q)) && (!from || day >= from) && (!to || day <= to);
@@ -1620,7 +1624,8 @@ function renderArchive() {
   const t = $("aTable");
   if (!t) return;
   const rows = archiveRows();
-  filterChip("aFilterChip", aFilter === "closed" ? "فلتر: الأسئلة المغلقة فقط" : "", "clearAFilter");
+  const aChip = { closed: "فلتر: الأسئلة المغلقة فقط", "closed:timeout": "فلتر: أُغلقت بانتهاء المهلة", "closed:manual": "فلتر: أُغلقت يدوياً", "closed:max_followups": "فلتر: وصلت للحد الأقصى من المتابعات" };
+  filterChip("aFilterChip", aChip[aFilter] || "", "clearAFilter");
   if (!rows.length) { t.innerHTML = '<tr><td class="muted">مفيش أسئلة مؤرشفة حسب الفلتر الحالي</td></tr>'; return; }
   const aSig = JSON.stringify([$("aSearch")?.value, $("aFrom")?.value, $("aTo")?.value, aFilter]);
   if (aSig !== lastASig) { aLimit = PAGE_SIZE; lastASig = aSig; }
@@ -1831,21 +1836,50 @@ async function loadHoursForDate(date) {
 
 // ---------- كروت الإحصائيات (عملاء + أسئلة) ----------
 function calcQStats(list) {   // نفس منطق السيرفر (computeQuestionStats): كل سؤال أصلي مرة، والمتابعات مش بتتعد
-  const seen = new Set(), c = { total: 0, open: 0, fu: 0, wait: 0, closed: 0, legacy: 0 };
+  const seen = new Set(), c = { total: 0, open: 0, fu: 0, wait: 0, closed: 0, legacy: 0, ct: 0, cx: 0, cm: 0 };
   for (const x of list) {
     const k = x.id || x.raw; if (k) { if (seen.has(k)) continue; seen.add(k); }
     c.total++;
     const st = x.status || "open";
     if (st === "open") c.open++; else if (st === "followup_pending") c.fu++; else if (st === "awaiting_followup") c.wait++;
-    else if (st === "archived") c.closed++; else if (st === "answered") c.legacy++;
+    else if (st === "archived") { c.closed++; const k = closeKind(x); if (k === "timeout") c.ct++; else if (k === "max_followups") c.cx++; else c.cm++; }
+    else if (st === "answered") c.legacy++;
   }
   return c;
+}
+// سبب إغلاق السؤال: انتهت المهلة / وصل للحد / يدوي (والقديم اللي مالوش سبب مسجّل بيتحسب يدوي)
+function closeKind(x) { return x.closeReason === "timeout" ? "timeout" : x.closeReason === "max_followups" ? "max_followups" : "manual"; }
+// نسب مجموعها 100% بالظبط (أكبر باقي)، وصفر لو مفيش أسئلة مغلقة
+function percents(nums) {
+  const total = nums.reduce((a, b) => a + b, 0);
+  if (!total) return nums.map(() => 0);
+  const raw = nums.map((n) => (n / total) * 100), out = raw.map(Math.floor);
+  let left = 100 - out.reduce((a, b) => a + b, 0);
+  raw.map((v, i) => [v - Math.floor(v), i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { out[i]++; left--; } });
+  return out;
+}
+function closedCardHtml(timeout, manual, maxf) {
+  const total = timeout + manual + maxf;
+  const p = percents([timeout, manual, maxf]);
+  const row = (kind, label, n, pc, color) => `<div class="click" style="cursor:pointer" onclick="goArchive('closed:${kind}')" title="عرض هذه الأسئلة في الأرشيف">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px"><span>${label}</span><span><b>${n}</b> · ${pc}%</span></div>
+      <div style="height:8px;background:var(--soft);border-radius:4px"><div style="width:${pc}%;height:8px;background:${color};border-radius:4px"></div></div></div>`;
+  return `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
+      <h3 style="margin:0;font-size:15px">🔒 الأسئلة المغلقة: ليه اتقفلت؟</h3>
+      <span class="muted">الإجمالي <b id="qs-closed">${total}</b></span></div>
+    <div style="display:grid;gap:12px">
+      ${row("timeout", "⏱ انتهت المهلة (العميل ما كمّلش خلال 24 ساعة)", timeout, p[0], "#7F77DD")}
+      ${row("manual", "🖐 أُغلقت يدوياً من الإدارة", manual, p[1], "#1D9E75")}
+      ${row("max_followups", "🔁 وصلت للحد الأقصى من المتابعات", maxf, p[2], "#D85A30")}
+    </div>
+    <p class="muted" style="margin:10px 0 0;font-size:12px">«يدوياً» بتشمل الأسئلة القديمة اللي ما اتسجلش لها سبب. اضغط أي سطر لعرض أسئلته في الأرشيف.</p>`;
 }
 function updateQuestionCards() {   // بيحدّث الأرقام فوراً بعد أي تغيير في حالة سؤال (من غير إعادة رسم الصفحة)
   if (!$("qs-total")) return;
   const c = calcQStats(questionsCache);
   const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
-  set("qs-total", c.total); set("qs-open", c.open); set("qs-fu", c.fu); set("qs-closed", c.closed); set("qs-archive", c.closed + c.legacy);
+  set("qs-total", c.total); set("qs-open", c.open); set("qs-fu", c.fu); set("qs-archive", c.closed + c.legacy);
+  const cc = $("qs-closedcard"); if (cc) cc.innerHTML = closedCardHtml(c.ct, c.cm, c.cx);
   set("qs-wait", `منهم ${c.wait} في انتظار رد العميل`);
 }
 function statsSectionsHtml(st) {
@@ -1866,9 +1900,9 @@ function statsSectionsHtml(st) {
       <div class="kpi click" onclick="openAllQuestions()"><div class="n" id="qs-total">${q.total}</div><div class="l">📚 إجمالي الأسئلة</div><div class="sub" id="qs-wait">منهم ${q.awaitingCustomer} في انتظار رد العميل</div></div>
       <div class="kpi click" onclick="goQuestions('open')"><div class="n" id="qs-open">${q.open}</div><div class="l">🆕 جديدة لم يتم الرد عليها</div></div>
       <div class="kpi click" onclick="goQuestions('followup_pending')"><div class="n" id="qs-fu">${q.followupPending}</div><div class="l">🔔 تحتاج إلى متابعة</div><div class="sub">متابعة من العميل بانتظار رد الإدارة</div></div>
-      <div class="kpi click" onclick="goArchive('closed')"><div class="n" id="qs-closed">${q.closed}</div><div class="l">🔒 الأسئلة المغلقة</div><div class="sub">تم إغلاقها (يدوياً أو تلقائياً أو بالحد)</div></div>
       <div class="kpi click" onclick="goArchive(null)"><div class="n" id="qs-archive">${q.archiveTotal}</div><div class="l">🗄️ إجمالي الأرشيف</div><div class="sub">المغلقة + القديمة المُجاب عنها</div></div>
     </div>
+    <div class="card" id="qs-closedcard" style="margin-top:12px">${closedCardHtml(q.closedTimeout || 0, q.closedManual || 0, q.closedMaxFollowups || 0)}</div>
     `;
 }
 
@@ -1889,24 +1923,32 @@ async function openCustomersList(filter) {
   const { bg } = mkModal(`<h2 style="margin:0 0 10px">${title}</h2>
     <input id="cl-q" placeholder="🔍 ابحث بالاسم أو Username أو Telegram ID${role === "admin" ? " أو رقم الهاتف" : ""}">
     <div id="cl-body" class="muted" style="margin-top:10px">جاري التحميل...</div>
+    <div id="cl-pager" style="display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:10px"></div>
     ${filter === "notshared" ? '<p class="muted" style="font-size:12px">القائمة تعرض العملاء المعروفين للنظام (من تفاعل بعد التحديث أو أرسل سؤالاً). باقي المشتركين القدامى بيظهروا تدريجياً عند أول تفاعل لهم، فممكن يكون عدد القائمة أقل من رقم الكارت.</p>' : ""}
     <div class="row" style="margin-top:10px"><button class="ghost" data-close>إغلاق</button></div>`, 760);
-  const input = bg.querySelector("#cl-q"), body = bg.querySelector("#cl-body");
-  let seq = 0;
+  const input = bg.querySelector("#cl-q"), body = bg.querySelector("#cl-body"), pager = bg.querySelector("#cl-pager");
+  let seq = 0, page = 1;
   const load = async () => {
     const mine = ++seq;
     try {
-      const r = await api("customers", { filter, q: input.value.trim() });
+      const r = await api("customers", { filter, q: input.value.trim(), page });
       if (mine !== seq) return;
+      page = r.page;
       body.className = "";
-      body.innerHTML = r.customers.length ? `<div class="muted" style="margin-bottom:6px">عدد النتائج: ${r.total}${r.total > r.customers.length ? ` (معروض ${r.customers.length})` : ""}</div><div style="overflow:auto;max-height:55vh"><table><tr><th>العميل</th><th>Telegram ID</th><th>حالة المشاركة</th><th>أول تفاعل مسجل</th><th></th></tr>${r.customers.map((c) => `<tr>
+      body.innerHTML = r.customers.length ? `<div class="muted" style="margin-bottom:6px">عدد النتائج: ${r.total}</div><div style="overflow:auto"><table><tr><th>العميل</th><th>Telegram ID</th><th>حالة المشاركة</th><th>أول تفاعل مسجل</th><th></th></tr>${r.customers.map((c) => `<tr>
           <td><b>${esc(c.name || "غير معروف")}</b>${c.username ? `<br><span class="muted" dir="ltr">@${esc(c.username)}</span>` : ""}</td>
           <td dir="ltr">${esc(c.chatId)}</td><td>${PHONE_STATE_LABEL[c.phoneState] || ""}</td>
           <td>${c.firstSeen ? esc(fmtTime(c.firstSeen)) : "—"}</td>
           <td><button class="ghost" onclick='openCustomerDetail(${JSON.stringify(c.chatId)})'>تفاصيل</button></td></tr>`).join("")}</table></div>` : '<div class="muted">لا يوجد عملاء مطابقون</div>';
+      pager.innerHTML = r.pages > 1 ? `<button class="ghost" data-p="1" ${page === 1 ? "disabled" : ""}>⏮ الأولى</button>
+        <button class="ghost" data-p="${page - 1}" ${page === 1 ? "disabled" : ""}>السابق ▶</button>
+        <span class="muted">صفحة <b>${page}</b> من ${r.pages}</span>
+        <button class="ghost" data-p="${page + 1}" ${page === r.pages ? "disabled" : ""}>◀ التالي</button>
+        <button class="ghost" data-p="${r.pages}" ${page === r.pages ? "disabled" : ""}>الأخيرة ⏭</button>` : "";
+      pager.querySelectorAll("button[data-p]").forEach((b) => (b.onclick = () => { page = +b.dataset.p; load(); body.scrollIntoView({ block: "nearest" }); }));
     } catch (e) { if (mine === seq) body.textContent = e.message; }
   };
-  let timer; input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(load, 300); });
+  let timer; input.addEventListener("input", () => { clearTimeout(timer); page = 1; timer = setTimeout(load, 300); });
   load();
 }
 
