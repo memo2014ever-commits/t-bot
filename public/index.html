@@ -348,7 +348,7 @@ async function api(action, extra = {}) {
     body: JSON.stringify({ ...creds, action, ...extra }),
   });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j.error || "حصل خطأ");
+  if (!res.ok) { const err = new Error(j.error || "حصل خطأ"); err.status = res.status; throw err; }
   return j;
 }
 
@@ -370,10 +370,12 @@ function toggleTheme() {
 applyTheme(localStorage.getItem("legan-theme") || "light");
 
 // ---------- الدخول والخروج ----------
+const SESSION_KEY = "legan-session";
 async function login() {
   creds = { username: $("u").value, password: $("p").value };
   try {
     const j = await api("get");
+    try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(creds)); } catch {}
     data = j.content;
     role = j.role;
     $("login").classList.add("hidden");
@@ -388,11 +390,22 @@ async function login() {
     loadQuestions();
   } catch (e) {
     creds = null;
+    // نمسح الجلسة المحفوظة بس لو البيانات اترفضت فعلاً (مش عند انقطاع النت)
+    if (e.status === 401 || e.status === 403) { try { sessionStorage.removeItem(SESSION_KEY); } catch {} }
     $("loginMsg").textContent = e.message;
   }
 }
+// ريفرش أو رجوع للتاب: ندخل تلقائياً بالجلسة المحفوظة بدل ما نطلب الدخول من الأول
+async function autoLogin() {
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null"); } catch {}
+  if (!saved || !saved.username || !saved.password) return;
+  $("u").value = saved.username; $("p").value = saved.password;
+  await login();
+}
 
 function logout() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch {}
   if (dirty && !confirm("فيه تعديلات مش متحفظة. هتتحفظ كمسودة في المتصفح. تخرج؟")) return;
   if (dirty) localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
   location.reload();
@@ -433,8 +446,10 @@ function showTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   ["stats", "menu", "questions", "archive", "presslog", "history", "bans"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
   if (name === "stats") loadStats();
-  if (name === "questions") loadQuestions();
-  if (name === "archive") loadQuestions();
+  if (name === "questions" || name === "archive") {
+    if (questionsCache.length) { renderQuestions(); renderArchive(); }   // نعرض اللي عندنا فوراً، وبعدين نحدّث
+    loadQuestions();
+  }
   if (name === "presslog") loadPressLog();
   if (name === "history") loadHistory();
   if (name === "bans") loadBans();
@@ -1016,7 +1031,7 @@ function typedConfirm(text, word) {
 
 async function resetAllStats() {
   const ok = await typedConfirm(
-    "هتتصفر كل الإحصائيات (الضغطات والمشتركين والمصادر). مش هيتأثر البوت ولا المحتوى، ومينفعش تترجع.",
+    "هتتصفر كل الإحصائيات (الضغطات والمشتركين). مش هيتأثر البوت ولا المحتوى، ومينفعش تترجع.",
     "تصفير");
   if (!ok) return;
   try {
@@ -1094,16 +1109,12 @@ function buttonRows(st) {
     .sort((a, b) => b[1] - a[1])
     .map(([k, v]) => [k.split("|")[1], v])];
 }
-function sourceRows(st) {
-  return [["المصدر", "العدد"], ...Object.entries(st.bySource || {}).sort((a, b) => b[1] - a[1])];
-}
 function unusedRows(st) {
   return [["زرار ما اتداسش خلال 7 أيام"], ...unusedNodes(st).map(({ node }) => [node.label || "بدون اسم"])];
 }
 
 function exportDaily() { if (lastStats) csvDownload(`يومي_${today()}.csv`, dailyRows(lastStats)); }
 function exportButtons() { if (lastStats) csvDownload(`الزراير_${today()}.csv`, buttonRows(lastStats)); }
-function exportSources() { if (lastStats) csvDownload(`المصادر_${today()}.csv`, sourceRows(lastStats)); }
 function exportUnused() { if (lastStats) csvDownload(`غير_مستخدم_${today()}.csv`, unusedRows(lastStats)); }
 
 function exportAll() {
@@ -1153,7 +1164,6 @@ function openReport() {
   </div>
   <h2>يومي (آخر 7 أيام)</h2>${table(dailyRows(st))}
   <h2>أكتر الزراير استخداماً</h2>${table(buttonRows(st))}
-  <h2>مصادر العملاء</h2>${table(sourceRows(st))}
   <h2>زراير ما اتداستش</h2>${table(unusedRows(st))}
   <br><button onclick="window.print()">🖨 طباعة / حفظ PDF</button>
   </body></html>`;
@@ -1171,9 +1181,16 @@ function esc(v) {
 let questionsCache = [];
 let extrasCache = {}, defaultFuLimit = 3;   // زيادات حد المتابعات لكل عميل (من السيرفر)
 const fuLimit = (chatId) => defaultFuLimit + (Number(extrasCache[String(chatId)]) || 0);
+const PAGE_SIZE = 50;   // نرسم 50 صف بس في المرة (الباقي بزرار "عرض المزيد") علشان الصفحة ما تتقلش
+let qLimit = PAGE_SIZE, aLimit = PAGE_SIZE, lastQSig = "", lastASig = "";
 let customersCache = {};   // chatId -> بيانات العميل (الاسم/username/الرقم للأدمن فقط/حالة المشاركة)
 let qFilter = null, aFilter = null;   // فلتر الكروت: qFilter = open | followup_pending ، aFilter = closed
-function setQuestionsData(r) { customersCache = r.customers || {}; questionsCache = r.questions; extrasCache = r.extras || {}; defaultFuLimit = r.defaultFollowupLimit || 3; updateQuestionCards(); }
+let custIdx = {};   // chatId -> { n: عدد أسئلته, first: أقدم سؤال } (بيتحسب مرة واحدة بدل ما يتحسب لكل صف)
+function setQuestionsData(r) {
+  customersCache = r.customers || {}; questionsCache = r.questions;
+  custIdx = {};
+  for (const x of r.questions) { const e = (custIdx[String(x.chatId)] ||= { n: 0, first: Infinity }); e.n++; if (x.t < e.first) e.first = x.t; }
+  if (r.intake) intakeState = r.intake; extrasCache = r.extras || {}; defaultFuLimit = r.defaultFollowupLimit || 3; updateQuestionCards(); }
 function normQ(q) { return q.trim().replace(/\s+/g, " ").toLowerCase(); }
 function customerQuestions(chatId) {
   return chatId ? questionsCache.filter((x) => x.chatId === chatId) : [];
@@ -1399,12 +1416,21 @@ function openQuestionsFromBell() { showTab("questions"); }
 let autoTimer = null;
 function startAutoRefresh() {
   if (autoTimer) clearInterval(autoTimer);
-  autoTimer = setInterval(refreshQuestionsSilently, 60000);
+  autoTimer = setInterval(refreshQuestionsSilently, 30000);
 }
+// أول ما ترجع للتاب (بعد ما كان في الخلفية) نحدّث فوراً، لأن المتصفح بيوقف المؤقتات في التابات المخفية
+let lastQRefresh = 0;
+function refreshOnReturn() { if (creds && !document.hidden && Date.now() - lastQRefresh > 3000) refreshQuestionsSilently(); }
+document.addEventListener("visibilitychange", refreshOnReturn);
+window.addEventListener("focus", refreshOnReturn);
+window.addEventListener("online", refreshOnReturn);
 async function refreshQuestionsSilently() {
   if (!creds || document.hidden) return;
+  lastQRefresh = Date.now();
   try {
+    const wasOn = intakeState ? intakeState.enabled : null;
     setQuestionsData(await api("questions"));
+    if (intakeState && wasOn !== intakeState.enabled && document.activeElement?.id !== "intakeMsg") renderIntake();
     updateBell();
     const open = !$("tab-questions").classList.contains("hidden");
     // ما نرسمش من جديد لو فيه رد مكتوب ولسه ما اتبعتش
@@ -1421,7 +1447,7 @@ async function loadQuestions() {
     renderArchive();
     updateBell();
     renderQuickList();
-    loadIntake();
+    if (document.activeElement?.id !== "intakeMsg") renderIntake();
   } catch (e) { toast(e.message, "bad"); }
 }
 
@@ -1442,8 +1468,8 @@ function custInfoHtml(x) {
   else if (c.hasPhone && role === "admin") phone = "⚠️ تعذّر فك تشفير الرقم (راجع PHONE_ENC_KEY)";
   else if (c.hasPhone) phone = "🔒 غير مصرح لك بعرض الرقم";
   else phone = "لم تتم مشاركة رقم الهاتف";
-  const own = id ? customerQuestions(id) : [];
-  const first = c.firstSeen || (own.length ? Math.min(...own.map((q) => q.t)) : null);
+  const ix = id ? custIdx[id] : null;
+  const first = c.firstSeen || (ix ? ix.first : null);
   return `<b>${esc(name)}</b>${uname ? ` <span class="muted" dir="ltr">@${esc(uname)}</span>` : ""}
     <div class="cinfo">📱 ${phone}${id ? `<br>🆔 <span dir="ltr">${esc(id)}</span> <span style="opacity:.7">(Telegram User ID / Chat ID)</span>` : ""}${first ? `<br>🗓 أول تفاعل مسجل: ${esc(fmtTime(first))}` : ""}</div>`;
 }
@@ -1500,6 +1526,10 @@ async function saveIntakeMessage() {
   renderIntake();
 }
 
+function moreRow(total, shown, action) {
+  if (total <= shown) return total > PAGE_SIZE ? `<tr><td colspan="9" class="muted">تم عرض كل النتائج (${total})</td></tr>` : "";
+  return `<tr><td colspan="9" style="text-align:center"><button class="ghost" onclick="${action}">⬇️ عرض ${Math.min(PAGE_SIZE, total - shown)} إضافية (معروض ${shown} من ${total})</button></td></tr>`;
+}
 function renderQuestions() {
   const t = $("qTable");
   const q = ($("qSearch").value || "").trim();
@@ -1509,7 +1539,10 @@ function renderQuestions() {
   const rows = questionsCache.filter((x) => !["answered", "archived"].includes(x.status) && byFilter(x) && (!q || x.q.includes(q) || custSearchMatch(x, q)));
   filterChip("qFilterChip", qFilter === "open" ? "فلتر: الأسئلة الجديدة" : qFilter === "followup_pending" ? "فلتر: تحتاج متابعة" : "", "clearQFilter");
   if (!rows.length) { t.innerHTML = '<tr><td class="muted">' + (qFilter || q ? "مفيش أسئلة مطابقة للفلتر الحالي" : "مفيش أسئلة بعد") + '</td></tr>'; return; }
-  t.innerHTML = `<tr><th>العميل</th><th>السؤال</th><th>عدد مرات</th><th>الوقت</th><th>الإجابة</th><th></th></tr>` + rows.map((x) => `
+  const qSig = JSON.stringify([q, qFilter]);
+  if (qSig !== lastQSig) { qLimit = PAGE_SIZE; lastQSig = qSig; }   // فلتر/بحث جديد: نبدأ من أول صفحة
+  const qShown = rows.slice(0, qLimit);
+  t.innerHTML = `<tr><th>العميل</th><th>السؤال</th><th>عدد مرات</th><th>الوقت</th><th>الإجابة</th><th></th></tr>` + qShown.map((x) => `
     <tr>
       <td style="min-width:190px">${custInfoHtml(x)}</td>
       <td style="white-space:pre-wrap">${esc(x.q)}${(x.attachments||[]).map(a => `<br><a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" style="max-width:120px;max-height:90px;border-radius:8px;margin-top:4px;display:block"></a>`).join("")}</td>
@@ -1518,8 +1551,8 @@ function renderQuestions() {
       <td style="min-width:280px">
         ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">المتابعات: ${x.followups?.length || 0}/${fuLimit(x.chatId)}<br>${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><div class="answer-toolbar"><label class="file-label" onclick="event.stopPropagation()"><span id="answer-img-name-${esc(x.id)}">📎 إرفاق صورة</span><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" onchange="this.closest('.file-label').querySelector('span').textContent=this.files[0]?.name||'📎 إرفاق صورة'"></label><button class="ok" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد<br><button class="ghost" style="margin-top:6px" onclick='showFollowup(${JSON.stringify(x.id)})'>📩 عرض متابعة العميل</button><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><div class="answer-toolbar"><label class="file-label" onclick="event.stopPropagation()"><span id="answer-img-name-${esc(x.id)}">📎 إرفاق صورة</span><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" onchange="this.closest('.file-label').querySelector('span').textContent=this.files[0]?.name||'📎 إرفاق صورة'"></label><button class="ok" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><div class="answer-toolbar"><label class="file-label" onclick="event.stopPropagation()"><span id="answer-img-name-${esc(x.id)}">📎 إرفاق صورة</span><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" onchange="this.closest('.file-label').querySelector('span').textContent=this.files[0]?.name||'📎 إرفاق صورة'"></label><button class="ok" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
       </td>
-      <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}${x.chatId && role === "admin" ? limitBtn(x.chatId) : ""}<button class="ghost" style="margin-bottom:6px" onclick='closeQuestionFromPanel(${JSON.stringify(x.id)})'>🔒 إغلاق</button>${x.chatId && role === "admin" ? `<button class="danger" style="margin-bottom:6px" onclick='openBanDialog(${JSON.stringify(x.chatId)}, ${JSON.stringify(x.customerName || "")})'>🚫 حظر</button>` : ""}<button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
-    </tr>`).join("");
+      <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${custIdx[String(x.chatId)]?.n || 0})</button>` : ""}${x.chatId && role === "admin" ? limitBtn(x.chatId) : ""}<button class="ghost" style="margin-bottom:6px" onclick='closeQuestionFromPanel(${JSON.stringify(x.id)})'>🔒 إغلاق</button>${x.chatId && role === "admin" ? `<button class="danger" style="margin-bottom:6px" onclick='openBanDialog(${JSON.stringify(x.chatId)}, ${JSON.stringify(x.customerName || "")})'>🚫 حظر</button>` : ""}<button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
+    </tr>`).join("") + moreRow(rows.length, qShown.length, "qLimit += PAGE_SIZE; renderQuestions()");
 }
 
 async function uploadImageToImgBB(file) {
@@ -1608,15 +1641,18 @@ function renderArchive() {
   const rows = archiveRows();
   filterChip("aFilterChip", aFilter === "closed" ? "فلتر: الأسئلة المغلقة فقط" : "", "clearAFilter");
   if (!rows.length) { t.innerHTML = '<tr><td class="muted">مفيش أسئلة مؤرشفة حسب الفلتر الحالي</td></tr>'; return; }
-  t.innerHTML = `<tr><th>العميل</th><th>السؤال</th><th>ملخص الإجابة</th><th>وقت السؤال</th><th>وقت الرد</th><th></th></tr>` + rows.map((x) => `
+  const aSig = JSON.stringify([$("aSearch")?.value, $("aFrom")?.value, $("aTo")?.value, aFilter]);
+  if (aSig !== lastASig) { aLimit = PAGE_SIZE; lastASig = aSig; }
+  const aShown = rows.slice(0, aLimit);
+  t.innerHTML = `<tr><th>العميل</th><th>السؤال</th><th>ملخص الإجابة</th><th>وقت السؤال</th><th>وقت الرد</th><th></th></tr>` + aShown.map((x) => `
     <tr>
-      <td style="min-width:190px">${custInfoHtml(x)}${x.chatId ? `<button class="ghost" style="margin-top:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${customerQuestions(x.chatId).length})</button>` : ""}${x.chatId && role === "admin" ? `<br>${limitBtn(x.chatId)}` : ""}</td>
+      <td style="min-width:190px">${custInfoHtml(x)}${x.chatId ? `<button class="ghost" style="margin-top:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${custIdx[String(x.chatId)]?.n || 0})</button>` : ""}${x.chatId && role === "admin" ? `<br>${limitBtn(x.chatId)}` : ""}</td>
       <td style="white-space:pre-wrap">${esc(x.q)}${(x.attachments||[]).map(a => `<br><a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" style="max-width:120px;max-height:90px;border-radius:8px;margin-top:4px;display:block"></a>`).join("")}</td>
       <td><span class="muted">${answerEntries(x).length} إجابات</span><br><span>${esc(shortText(x.answer || answerEntries(x).at(-1)?.text || ""))}</span><br><button class="ghost" style="margin-top:4px" onclick='showConversation(${JSON.stringify(x.id)})'>🗂️ عرض المحادثة</button></td>
       <td>${fmtTime(x.t)}</td>
       <td>${x.answeredAt ? fmtTime(x.answeredAt) : "—"}</td>
       <td><div class="q-actions"><button class="ghost" onclick='editArchiveAnswer(${JSON.stringify(x.id)})'>📝 تعديل/إرسال</button><button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑 حذف</button></div></td>
-    </tr>`).join("");
+    </tr>`).join("") + moreRow(rows.length, aShown.length, "aLimit += PAGE_SIZE; renderArchive()");
 }
 
 function clearArchiveFilters() {
@@ -2023,10 +2059,7 @@ async function loadStats() {
       <div class="card"><div class="row"><h2 style="margin:0">🔤 أكتر الكلمات اللي ما اتطابقتش</h2><div class="row" style="gap:6px"><button class="ghost" onclick="exportUnmatched()">📥 تصدير</button><button class="danger" onclick="deleteSelectedUnmatched()">🗑 حذف المحدد</button><button class="danger" onclick="clearAllUnmatched()">🧹 حذف الكل</button></div></div>
         <table><tr><th><input type="checkbox" onchange="toggleAllUnmatched(this)" aria-label="تحديد الكل"> الكلمة</th><th>عدد مرات الكتابة</th><th>إجراء</th></tr>${umRows}</table>
         <p class="muted" style="margin:10px 0 0">لو كلمة متكررة وملهاش رد، ضيفها في 🔑 كلمات الاستدعاء للزرار المناسب.</p></div>
-
-      <div class="card"><div class="row"><h2 style="margin:0">مصادر المستخدمين</h2><button class="ghost" onclick="exportSources()">📥 تصدير</button></div>
-        <table><tr><th>المصدر</th><th>العدد</th><th></th></tr>${barRows(st.bySource)}</table>
-        <p class="muted" style="margin:10px 0 0">من البوت الآخر = رابط يبدأ بـ ?start=book، ومن البحث = الدخول بالمنشن أو البحث المباشر.</p></div>`;
+`;
   } catch (e) {
     box.innerHTML = `<div class="card" style="color:var(--bad)">${esc(e.message)}</div>`;
   }
@@ -2164,6 +2197,7 @@ async function restoreVersion(sha) {
     toast("اتحمّلت النسخة في المحرر، اضغط حفظ لتثبيتها", "ok");
   } catch (e) { toast(e.message, "bad"); }
 }
+autoLogin();
 </script>
 </body>
 </html>
