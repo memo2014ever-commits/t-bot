@@ -128,13 +128,16 @@ export default async function handler(req, res) {
 
     if (action === "questions") {
       const expired = await closeExpiredQuestions();
-      const systemMessages = (await readCurrent()).content.messages || {};
-      await Promise.all(expired.map((x) => sendCloseNotice(x.chatId, true, systemMessages).catch(() => {})));
+      // نكلّم GitHub بس لو فيه أسئلة انتهت فعلاً (بدل كل تحديث): ده كان أكبر سبب لبطء الصفحة
+      if (expired.length) {
+        const systemMessages = (await readCurrent()).content.messages || {};
+        await Promise.all(expired.map((x) => sendCloseNotice(x.chatId, true, systemMessages).catch(() => {})));
+      }
       // extras: زيادات حد المتابعات لكل عميل (أمر Redis واحد)، والواجهة تحسب الحد = الافتراضي + الزيادة
-      const questions = await getQuestions();
+      const [questions, extras, intake] = await Promise.all([getQuestions(), getAllExtras().catch(() => ({})), getIntake()]);
       // بيانات أصحاب الأسئلة (3 أوامر Redis مهما كان العدد). رقم الهاتف للأدمن فقط
       const customers = await customerMap(questions.map((x) => x.chatId), { withPhones: role === "admin" }).catch(() => ({}));
-      return res.json({ questions, customers, phoneFeature: phoneFeatureEnabled(), extras: await getAllExtras().catch(() => ({})), defaultFollowupLimit: MAX_FOLLOWUPS });
+      return res.json({ questions, customers, intake: { ...intake, defaultMessage: DEFAULT_INTAKE_MESSAGE }, phoneFeature: phoneFeatureEnabled(), extras, defaultFollowupLimit: MAX_FOLLOWUPS });
     }
 
     if (action === "answerQuestion") {

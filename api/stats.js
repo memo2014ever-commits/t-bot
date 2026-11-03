@@ -22,13 +22,13 @@ export async function redis(cmd) {
 }
 
 // عميل جديد (/start)
-export async function trackVisitor(chatId, source) {
+// (مصدر المستخدم src:* اتشال: مكنش بيفيد، وده كمان بيوفر أمر Redis في كل /start)
+export async function trackVisitor(chatId) {
   const id = String(chatId);
   const isNew = await redis(["PFADD", "subs:all", id]);
   await redis(["PFADD", `active:day:${todayKey()}`, id]);
   await redis(["PFADD", `subs:day:${todayKey()}`, id]);
   if (isNew === 1) await redis(["PFADD", `subs:new:day:${todayKey()}`, id]);
-  await redis(["PFADD", `src:${source === "book" ? "book" : "none"}`, id]);
 }
 
 // أي تفاعل فعلي مع البوت يجعل المستخدم نشطًا في هذا اليوم.
@@ -385,9 +385,9 @@ export async function getStats() {
     const byPath = toObj(press);
     return { date, active: active ?? 0, newSubs: newSubs ?? 0, presses: sum(byPath), byPath, hours };
   }));
-  const [subsAll, newToday, activeToday, srcBook, srcNone] = await Promise.all([
+  const [subsAll, newToday, activeToday] = await Promise.all([
     redis(["PFCOUNT", "subs:all"]), redis(["PFCOUNT", `subs:new:day:${todayKey()}`]),
-    redis(["PFCOUNT", `active:day:${todayKey()}`]), redis(["PFCOUNT", "src:book"]), redis(["PFCOUNT", "src:none"]),
+    redis(["PFCOUNT", `active:day:${todayKey()}`]),
   ]);
   const agg = {};
   perDay.forEach((d) => Object.entries(d.byPath).forEach(([k, v]) => (agg[k] = (agg[k] || 0) + v)));
@@ -398,7 +398,6 @@ export async function getStats() {
     subscribersToday: perDay[6].active, newSubscribersToday: newToday ?? 0, activeToday: activeToday ?? 0,
     pressesToday: perDay[6].presses, pressesYesterday: perDay[5].presses,
     pressByPath: perDay[6].byPath, pressByPath7d: agg,
-    bySource: { "من البوت الآخر": srcBook ?? 0, "من البحث": srcNone ?? 0 },
     hours: last7Hours, last7Hours, peakLast7: peakHour(last7Hours), daily: perDay.map(({ date, newSubs, presses }) => ({ date, newSubs, presses })),
   };
 }

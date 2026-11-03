@@ -288,7 +288,7 @@ bot.command("start", async (ctx) => {
   try { if (await isBanned(ctx.chat.id)) return; } catch {}
   const { text, markup } = render(await getContent(), "");
   await ctx.reply(toHtml(text), HTML_OPTS(markup));
-  try { await trackVisitor(ctx.chat.id, ctx.match || ""); } catch {}
+  try { await trackVisitor(ctx.chat.id); } catch {}
   await maybePromptPhone(ctx);
 });
 
