@@ -1494,20 +1494,34 @@ function goArchive(f) { aFilter = f; showTab("archive"); }
 // ---------- مفتاح استقبال الأسئلة الجديدة ----------
 let intakeState = null;
 async function loadIntake() { try { intakeState = await api("getIntake"); } catch {} renderIntake(); }
+let intakeOpen = false;   // الكارت مطوي افتراضياً (بيظهر منه العنوان والحالة والمفتاح بس)
+try { intakeOpen = sessionStorage.getItem("intake-open") === "1"; } catch {}
+function toggleIntakePanel() {
+  intakeOpen = !intakeOpen;
+  try { sessionStorage.setItem("intake-open", intakeOpen ? "1" : "0"); } catch {}
+  const d = $("intakeDetails"), a = $("intakeArrow");
+  if (d) d.style.display = intakeOpen ? "block" : "none";
+  if (a) { a.textContent = intakeOpen ? "▴" : "▾"; a.setAttribute("aria-expanded", String(intakeOpen)); }
+}
 function renderIntake() {
   const el = $("intakeCard");
   if (!el || !intakeState) return;
   const on = intakeState.enabled, isAdmin = role === "admin";
-  el.innerHTML = `<div class="row">
+  el.innerHTML = `<div class="row" style="align-items:center">
       <div><h2 style="margin:0">📥 استقبال الأسئلة الجديدة</h2>
-        <div class="${on ? "status ok" : "status warn"}" style="margin-top:6px">${on ? "✅ استقبال الأسئلة مفعل" : "⏸️ استقبال الأسئلة متوقف مؤقتاً"}</div>
-        ${intakeState.updatedBy ? `<div class="muted" style="margin-top:4px">آخر تغيير بواسطة ${esc(intakeState.updatedBy)} · ${esc(fmtTime(intakeState.updatedAt))}</div>` : ""}</div>
-      <label class="sw" title="${isAdmin ? "تفعيل / إيقاف" : "للأدمن فقط"}"><input type="checkbox" id="intakeToggle" ${on ? "checked" : ""} ${isAdmin ? "" : "disabled"} onchange="toggleIntake(this.checked)"><span class="slider"></span></label>
+        <div class="${on ? "status ok" : "status warn"}" style="margin-top:6px">${on ? "✅ استقبال الأسئلة مفعل" : "⏸️ استقبال الأسئلة متوقف مؤقتاً"}</div></div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <label class="sw" title="${isAdmin ? "تفعيل / إيقاف" : "للأدمن فقط"}"><input type="checkbox" id="intakeToggle" ${on ? "checked" : ""} ${isAdmin ? "" : "disabled"} onchange="toggleIntake(this.checked)"><span class="slider"></span></label>
+        <button class="ghost" id="intakeArrow" onclick="toggleIntakePanel()" title="إظهار / إخفاء الإعدادات" aria-expanded="${intakeOpen}" style="padding:2px 10px;font-size:18px;line-height:1.4">${intakeOpen ? "▴" : "▾"}</button>
+      </div>
     </div>
-    <p class="muted" style="margin:8px 0">الإيقاف بيمنع إنشاء أسئلة جديدة فقط. المتابعات والردود والأرشيف والبحث والإجابات التلقائية بتفضل شغالة.</p>
-    ${isAdmin ? `<label class="muted">رسالة الاعتذار اللي بتظهر للعميل لما يضغط «ابعت سؤالك» (سيبها فاضية للنص الافتراضي)</label>
-      <textarea id="intakeMsg" rows="3" placeholder="${esc(intakeState.defaultMessage || "")}">${esc(intakeState.message || "")}</textarea>
-      <div class="row" style="margin-top:8px;justify-content:flex-start"><button class="ok" onclick="saveIntakeMessage()">💾 حفظ الرسالة</button></div>` : ""}`;
+    <div id="intakeDetails" style="display:${intakeOpen ? "block" : "none"}">
+      ${intakeState.updatedBy ? `<div class="muted" style="margin-top:8px">آخر تغيير بواسطة ${esc(intakeState.updatedBy)} · ${esc(fmtTime(intakeState.updatedAt))}</div>` : ""}
+      <p class="muted" style="margin:8px 0">الإيقاف بيمنع إنشاء أسئلة جديدة فقط. المتابعات والردود والأرشيف والبحث والإجابات التلقائية بتفضل شغالة.</p>
+      ${isAdmin ? `<label class="muted">رسالة الاعتذار اللي بتظهر للعميل لما يضغط «ابعت سؤالك» (سيبها فاضية للنص الافتراضي)</label>
+        <textarea id="intakeMsg" rows="3" placeholder="${esc(intakeState.defaultMessage || "")}">${esc(intakeState.message || "")}</textarea>
+        <div class="row" style="margin-top:8px;justify-content:flex-start"><button class="ok" onclick="saveIntakeMessage()">💾 حفظ الرسالة</button></div>` : ""}
+    </div>`;
 }
 async function toggleIntake(enabled) {
   const box = $("intakeToggle");
