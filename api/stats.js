@@ -410,20 +410,6 @@ export async function getStatsByDay(date) {
 }
 
 // التصفير يظل يدويًا فقط، ويمسح كل المفاتيح التاريخية المطابقة بدون حد 90 يومًا.
-async function deletePattern(pattern) {
-  let cursor = "0";
-  do {
-    const result = (await redis(["SCAN", cursor, "MATCH", pattern, "COUNT", "1000"])) || ["0", []];
-    cursor = String(result[0] ?? "0");
-    const keys = result[1] || [];
-    if (keys.length) await redis(["DEL", ...keys]);
-  } while (cursor !== "0");
-}
-export async function resetStats() {
-  await Promise.all(["subs:day:*", "subs:new:day:*", "active:day:*", "stats:press:*", "stats:hours:*"] .map(deletePattern));
-  await redis(["DEL", "subs:all", "src:book", "src:none", "presslog", "stats:hours", "unmatched"]);
-}
-
 function sum(o) { return Object.values(o).reduce((a, b) => a + b, 0); }
 function toObj(arr) { const o = {}; for (let i = 0; i < (arr?.length || 0); i += 2) o[arr[i]] = Number(arr[i + 1]); return o; }
 

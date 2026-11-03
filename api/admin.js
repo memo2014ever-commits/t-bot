@@ -1,7 +1,7 @@
 // خادم لوحة التحكم: تسجيل دخول بدورين (أدمن / محرر)، وقراءة وحفظ وسجل نسخ من GitHub
 // كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
 import { timingSafeEqual, createHash } from "crypto";
-import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched, banUser, unbanUser, getBans, getBanInfo, redis,
+import { getStats, getStatsByDay, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched, banUser, unbanUser, getBans, getBanInfo, redis,
   getIntake, setIntake, computeQuestionStats, DEFAULT_INTAKE_MESSAGE, MAX_FOLLOWUPS, MAX_EXTRA_PER_OPERATION, getExtraFollowups, getAllExtras, followupLimitFor, addExtraFollowups, claimOperation, logLimitChange, getLimitLog, reopenLastLimitClosed } from "./stats.js";
 import { phoneFeatureEnabled, phoneSharedCount, customerMap, listCustomers, customerDetail } from "./customers.js";
 
@@ -331,12 +331,6 @@ export default async function handler(req, res) {
 
     if (action === "presslog") {
       return res.json({ log: await getPressLog() });
-    }
-
-    if (action === "reset") {
-      if (role !== "admin") return res.status(403).json({ error: "التصفير للأدمن بس" });
-      await resetStats();
-      return res.json({ ok: true });
     }
 
     if (action === "history") {
