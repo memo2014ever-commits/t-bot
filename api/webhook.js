@@ -200,20 +200,30 @@ function choiceLine(content, hit) {
   return where ? `• ${hit.node.label} (${where})` : `• ${hit.node.label}`;
 }
 
-function render(node, path) {
+function render(node, path, hidePhoneBtn = false) {
   const kb = new InlineKeyboard();
   (node.items || []).forEach((item, i) => {
     if (item.action === "ask") kb.text(item.label, `ask:${path ? path + "." : ""}${i}`).row();
     else if (item.url) kb.url(item.label, item.url).row();
     else kb.text(item.label, `n:${path ? path + "." : ""}${i}`).row();
   });
-  if (path === "" && phoneFeatureEnabled()) kb.text(node.messages?.phoneMenuBtn || DEFAULT_PHONE_MENU_BTN, "sharephone").row();
+  if (path === "" && phoneFeatureEnabled() && !hidePhoneBtn) kb.text(node.messages?.phoneMenuBtn || DEFAULT_PHONE_MENU_BTN, "sharephone").row();
   if (path !== "") {
     const parent = path.includes(".") ? path.slice(0, path.lastIndexOf(".")) : "";
     kb.text("🔙 رجوع", `b:${parent}`).row();
     kb.text("🏠 القايمة الرئيسية", "home");   // يرجّع لأول قايمة في البوت
   }
   return { text: node.text || node.label || "—", markup: kb };
+}
+
+// القايمة الرئيسية: زرار "مشاركة رقم الهاتف" يختفي لو العميل شارك رقمه فعلاً، ويفضل ظاهر لو ما شاركش (حتى لو اختار بدون مشاركة)
+async function renderFor(ctx, node, path) {
+  let hide = false;
+  if (path === "" && phoneFeatureEnabled() && ctx.chat?.id) {
+    if (ctx._phoneShared === undefined) ctx._phoneShared = await hasPhone(ctx.chat.id).catch(() => false);
+    hide = ctx._phoneShared;
+  }
+  return render(node, path, hide);
 }
 
 const HTML_OPTS = (markup) => ({
@@ -251,7 +261,7 @@ async function handlePhoneSkip(ctx, text) {
   try { if (await isBanned(ctx.chat.id)) return true; } catch {}
   try { await skipPhone(ctx.from); } catch {}
   await ctx.reply(toHtml(m.phoneSkipped || DEFAULT_PHONE_SKIPPED), { parse_mode: "HTML", reply_markup: { remove_keyboard: true } });
-  const { text: t, markup } = render(content, "");
+  const { text: t, markup } = await renderFor(ctx, content, "");
   await ctx.reply(toHtml(t), HTML_OPTS(markup));
   return true;
 }
@@ -269,7 +279,8 @@ bot.on("message:contact", async (ctx) => {
   try { ok = await savePhone(ctx.from, phone); } catch (e) { console.error("[phone] save failed:", e?.message); }
   if (!ok) return ctx.reply(toHtml(m.phoneError || DEFAULT_PHONE_ERROR), { parse_mode: "HTML", reply_markup: { remove_keyboard: true } });
   await ctx.reply(toHtml(m.phoneThanks || DEFAULT_PHONE_THANKS), { parse_mode: "HTML", reply_markup: { remove_keyboard: true } });
-  const { text, markup } = render(content, "");
+  ctx._phoneShared = true;   // لسه حافظين الرقم: القايمة اللي هتتبعت من غير الزرار
+  const { text, markup } = await renderFor(ctx, content, "");
   await ctx.reply(toHtml(text), HTML_OPTS(markup));
 });
 
@@ -280,13 +291,13 @@ bot.callbackQuery("sharephone", async (ctx) => {
   if (!phoneFeatureEnabled() || ctx.chat?.type !== "private") return;
   const m = (await getContent().catch(() => ({}))).messages || {};
   try { await claimPhonePrompt(ctx.chat.id); } catch {}   // علشان الطلب التلقائي ما يظهرش بعد كده
-  if (await hasPhone(ctx.chat.id).catch(() => false)) return ctx.reply(toHtml(m.phoneAlready || DEFAULT_PHONE_ALREADY), HTML_OPTS(render(await getContent(), "").markup));
+  if (await hasPhone(ctx.chat.id).catch(() => false)) return ctx.reply(toHtml(m.phoneAlready || DEFAULT_PHONE_ALREADY), HTML_OPTS((await renderFor(ctx, await getContent(), "")).markup));
   return sendPhonePrompt(ctx, m);
 });
 
 bot.command("start", async (ctx) => {
   try { if (await isBanned(ctx.chat.id)) return; } catch {}
-  const { text, markup } = render(await getContent(), "");
+  const { text, markup } = await renderFor(ctx, await getContent(), "");
   await ctx.reply(toHtml(text), HTML_OPTS(markup));
   try { await trackVisitor(ctx.chat.id); } catch {}
   await maybePromptPhone(ctx);
@@ -297,7 +308,7 @@ async function showNode(ctx, path, track) {
   try {
     try { await trackActive(ctx.chat.id); } catch {}
     const node = getNode(await getContent(), path);
-    const { text, markup } = render(node, path);
+    const { text, markup } = await renderFor(ctx, node, path);
     await ctx.answerCallbackQuery();
     await ctx.reply(toHtml(text), HTML_OPTS(markup));
     if (track) { try { await trackPress(path, node.label); } catch {} }
@@ -381,7 +392,7 @@ bot.callbackQuery("pq", async (ctx) => {
   try { text = await takePending(ctx.chat.id); } catch {}
   const content = await getContent().catch(() => ({}));
   const m = content.messages || {};
-  const root = render(content, "").markup;
+  const root = (await renderFor(ctx, content, "")).markup;
   if (!text) return ctx.reply("انتهت المهلة، اكتب سؤالك تاني 👇", {
     reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
   });
@@ -400,11 +411,11 @@ bot.callbackQuery(/^ask:(.*)$/, async (ctx) => {
     const intake = await getIntake().catch(() => ({ enabled: true }));
     if (!intake.enabled) {   // الزرار ظاهر، لكن بنعتذر بدل ما نفتح خانة السؤال
       try { await trackPress(path, node.label); } catch {}
-      return ctx.reply(toHtml(intake.message || DEFAULT_INTAKE_MESSAGE), HTML_OPTS(render(content, "").markup));
+      return ctx.reply(toHtml(intake.message || DEFAULT_INTAKE_MESSAGE), HTML_OPTS((await renderFor(ctx, content, "")).markup));
     }
     if ((await questionsLeft(ctx.chat.id)) <= 0) {
       const lm = content.messages?.limitReached || DEFAULT_LIMIT;
-      return ctx.reply(fill(lm, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(render(content, "").markup));
+      return ctx.reply(fill(lm, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS((await renderFor(ctx, content, "")).markup));
     }
     await ctx.reply(content.messages?.askPrompt || DEFAULT_PROMPT, {
       reply_markup: { force_reply: true, input_field_placeholder: "اكتب سؤالك..." },
@@ -437,7 +448,7 @@ async function handleMessageCore(ctx, text, msg) {
   const content = await getContent().catch(() => ({}));
   const m = content.messages || {};
   try { await notifyExpired(await maybeExpireQuestions(), m.autoClosed || DEFAULT_CLOSED_AUTO); } catch {}
-  const root = render(content, "").markup;
+  const root = (await renderFor(ctx, content, "")).markup;
 
   const repliedMessageId = msg.reply_to_message?.message_id;
   if (msg.reply_to_message?.from?.is_bot && repliedMessageId) {
