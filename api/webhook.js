@@ -3,7 +3,7 @@ import { Bot, InlineKeyboard, Keyboard, webhookCallback } from "grammy";
 import {
   trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, getIntake, DEFAULT_INTAKE_MESSAGE, questionForReply, addFollowup, closeExpiredQuestions, maybeExpireQuestions, setPending, takePending, isBanned, setPendingImage, takePendingImage,
 } from "./stats.js";
-import { phoneFeatureEnabled, claimPhonePrompt, hasPhone, savePhone, skipPhone, upsertInfo, normalizePhone } from "./customers.js";
+import { phoneFeatureEnabled, claimPhonePrompt, phonePromptDue, hasPhone, savePhone, skipPhone, upsertInfo, normalizePhone } from "./customers.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
 const IMGBB_API_KEY = process.env.IMGBB_API_KEY;
@@ -239,12 +239,13 @@ const phoneKeyboard = (m = {}) => new Keyboard()
 
 const sendPhonePrompt = (ctx, m = {}) => ctx.reply(toHtml(m.phonePrompt || DEFAULT_PHONE_PROMPT), { parse_mode: "HTML", reply_markup: phoneKeyboard(m) });
 
-// طلب الرقم: مرة واحدة فقط لكل عميل (حجز ذري). العميل القديم يشوفه عند أول تفاعل له بعد التحديث، من غير أي رسالة جماعية.
+// طلب الرقم: أول تفاعل، وبعدها تذكير محدود حسب جدول (24 ساعة × 5 مرات لو تجاهل، وكل 3 أيام لمدة شهر لو اختار "بدون مشاركة").
+// العميل القديم يشوفه عند أول تفاعل له بعد التحديث، من غير أي رسالة جماعية.
 // ما بيشتغلش خالص لو PHONE_ENC_KEY مش مضبوط. وأي فشل هنا ما يوقفش البوت.
 async function maybePromptPhone(ctx) {
   try {
     if (!phoneFeatureEnabled() || ctx.chat?.type !== "private" || !ctx.from) return;
-    if (!(await claimPhonePrompt(ctx.chat.id))) return;
+    if (!(await phonePromptDue(ctx.chat.id))) return;
     if (await isBanned(ctx.chat.id)) return;
     try { await upsertInfo(ctx.from); } catch {}
     const m = (await getContent().catch(() => ({}))).messages || {};

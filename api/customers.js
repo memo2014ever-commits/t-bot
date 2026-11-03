@@ -68,11 +68,46 @@ export async function upsertInfo(from, extra = {}, now = Date.now()) {
   if (JSON.stringify(next) !== JSON.stringify(cur)) await redis(["HSET", INFO, id, JSON.stringify(next)]);
 }
 
-// ---------- حالة مشاركة الرقم ----------
-// "حجز" الطلب: HSETNX ذري، فيرجع 1 مرة واحدة بس لكل عميل حتى لو جه أكتر من رسالة في نفس اللحظة
-export async function claimPhonePrompt(chatId) {
+// ---------- حالة مشاركة الرقم + جدول التذكير ----------
+// القيمة المخزنة في cu:phs:  الحالة|عدد مرات الظهور|وقت آخر ظهور|وقت بداية الدورة   (والقيم القديمة بدون | بتتقرأ عادي)
+//  - phone_prompted (تجاهل الطلب): يظهر في أول تفاعل بعد كل 24 ساعة، لحد 5 مرات.
+//  - phone_skipped (ضغط "بدون مشاركة"): يتذكّر كل 3 أيام لمدة 30 يوم من وقت اختياره، وبعدها يقف والزرار يفضل اختياري.
+//  - phone_shared: مفيش طلب تاني.
+export const PROMPT_POLICY = {
+  ignoredMax: 5, ignoredEveryMs: 24 * 3600e3,
+  skippedEveryMs: 3 * 24 * 3600e3, skippedWindowMs: 30 * 24 * 3600e3,
+};
+const baseState = (v) => String(v ?? "").split("|")[0];
+function parseState(v) {
+  if (!v) return null;
+  const [state, c, last, start] = String(v).split("|");
+  return { state, count: Number(c) || 0, last: Number(last) || 0, start: Number(start) || 0 };
+}
+const enc = (state, count, last, start) => `${state}|${count}|${last}|${start}`;
+
+// بيرجع true لو لازم نعرض الطلب للعميل دلوقتي (وبيسجّل الظهور). مفيش طلب لأي عميل بيحصل أكتر من مرة في نفس اللحظة.
+export async function phonePromptDue(chatId, now = Date.now()) {
   if (!validId(chatId)) return false;
-  return (await redis(["HSETNX", PHS, String(chatId), "phone_prompted"])) === 1;
+  const id = String(chatId);
+  const cur = parseState(await redis(["HGET", PHS, id]));
+  // أول ظهور: HSETNX ذري (يرجع 1 لطلب واحد بس حتى لو جت رسايل كتير مع بعض)
+  if (!cur) return (await redis(["HSETNX", PHS, id, enc("phone_prompted", 1, now, now)])) === 1;
+  if (cur.state === "phone_shared") return false;
+  // سجل قديم من قبل جدول التذكير: نبدأ العدّ من دلوقتي من غير ما نظهر الطلب فجأة
+  if (!cur.last) { await redis(["HSET", PHS, id, enc(cur.state, cur.count || 1, now, cur.start || now)]); return false; }
+  let due = false;
+  if (cur.state === "phone_prompted") due = cur.count < PROMPT_POLICY.ignoredMax && now - cur.last >= PROMPT_POLICY.ignoredEveryMs;
+  else if (cur.state === "phone_skipped") due = now - cur.start <= PROMPT_POLICY.skippedWindowMs && now - cur.last >= PROMPT_POLICY.skippedEveryMs;
+  if (!due) return false;
+  // قفل قصير يمنع تكرار الطلب لو جت رسالتين في نفس اللحظة
+  if ((await redis(["SET", `pl:${id}`, "1", "NX", "EX", 60])) !== "OK") return false;
+  return (await redis(["HSET", PHS, id, enc(cur.state, cur.count + 1, now, cur.start || now)])) !== null;
+}
+
+// ضغط زرار القايمة الرئيسية: يتسجل إن الطلب اتعرض (من غير ما يلغي أي جدول موجود)
+export async function claimPhonePrompt(chatId, now = Date.now()) {
+  if (!validId(chatId)) return false;
+  return (await redis(["HSETNX", PHS, String(chatId), enc("phone_prompted", 1, now, now)])) === 1;
 }
 
 export async function hasPhone(chatId) {
@@ -96,7 +131,10 @@ export async function skipPhone(from) {
   if (!from || !validId(from.id)) return false;
   const id = String(from.id);
   if (await hasPhone(id)) return true;
-  const r = await redis(["HSET", PHS, id, "phone_skipped"]);
+  const now = Date.now(), cur = parseState(await redis(["HGET", PHS, id]));
+  // ضغطة "بدون مشاركة": بداية دورة التذكير كل 3 أيام (ولو كان متخطي قبل كده نحتفظ ببداية الدورة)
+  const keep = cur && cur.state === "phone_skipped" && cur.start;
+  const r = await redis(["HSET", PHS, id, enc("phone_skipped", keep ? cur.count : 0, now, keep ? cur.start : now)]);
   await upsertInfo(from).catch(() => {});
   return r !== null;
 }
@@ -104,7 +142,8 @@ export async function skipPhone(from) {
 // ---------- قراءة للوحة الإدارة ----------
 function stateOf(stored, hasPh) {
   if (hasPh) return "phone_shared";
-  return PHONE_STATES.includes(stored) && stored !== "phone_shared" ? stored : "phone_not_requested";
+  const b = baseState(stored);
+  return PHONE_STATES.includes(b) && b !== "phone_shared" ? b : "phone_not_requested";
 }
 
 // بيانات مجموعة عملاء (للأسئلة): 3 أوامر Redis فقط مهما كان العدد
