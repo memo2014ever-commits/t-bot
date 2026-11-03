@@ -100,12 +100,32 @@ export async function maybeExpireQuestions(now = Date.now()) {
   return closeExpiredQuestions(now);
 }
 
-export async function pushQuestion(text, chatId, customerName = "", attachments = []) {
+// ==================== مفتاح استقبال الأسئلة الجديدة ====================
+// محفوظ في Redis (بيسري فوراً من غير نشر). بيأثر على إنشاء الأسئلة الجديدة فقط.
+export const DEFAULT_INTAKE_MESSAGE = "نعتذر 🙏 استقبال الأسئلة الجديدة متوقف مؤقتاً حالياً.\nتقدر تتصفح القوايم والإجابات الجاهزة زي الأول، والمتابعات على أسئلتك السابقة شغالة بشكل طبيعي. هنفتح الاستقبال تاني قريباً.";
+const INTAKE_KEY = "cfg:intake";
+export async function getIntake() {
+  const a = await redis(["HMGET", INTAKE_KEY, "enabled", "message", "by", "at"]);
+  // لو Redis فشل أو مفيش إعداد: الاستقبال مفعل (الوضع الافتراضي القديم)
+  return { enabled: !Array.isArray(a) || a[0] !== "0", message: (Array.isArray(a) && a[1]) || "", updatedBy: (Array.isArray(a) && a[2]) || "", updatedAt: (Array.isArray(a) && Number(a[3])) || null };
+}
+export async function setIntake(enabled, message, by) {
+  const args = ["HSET", INTAKE_KEY, "enabled", enabled ? "1" : "0", "by", String(by).slice(0, 50), "at", Date.now()];
+  if (typeof message === "string") args.push("message", message.trim().slice(0, 500));
+  const r = await redis(args);
+  if (r === null) return false;
+  await redis(["LPUSH", "intake_log", JSON.stringify({ t: Date.now(), enabled: !!enabled, by: String(by).slice(0, 50) })]);
+  return true;
+}
+
+export async function pushQuestion(text, chatId, customerName = "", attachments = [], username = "") {
+  // تحقق نهائي في نفس دالة إنشاء السؤال: مهما كان مصدر الاستدعاء، السؤال الجديد ما بيتسجلش والاستقبال متوقف
+  if (!(await getIntake()).enabled) return { ok: false, reason: "intake_paused" };
   await redis(["LPUSH", "questions", JSON.stringify({
-    id: randomUUID(), t: Date.now(), q: String(text).slice(0, 500), chatId: String(chatId), customerName: String(customerName).slice(0, 150), status: "open",
+    id: randomUUID(), t: Date.now(), q: String(text).slice(0, 500), chatId: String(chatId), customerName: String(customerName).slice(0, 150), username: String(username || "").slice(0, 64), status: "open",
     attachments: Array.isArray(attachments) ? attachments.slice(0, 5) : [],
   })]);
-  if (Math.random() < 0.05) await redis(["LTRIM", "questions", 0, 499]);
+  return { ok: true };
 }
 
 const MAX_QUESTIONS = 3;
@@ -123,16 +143,103 @@ export async function questionAllowed(chatId) {
 export const MAX_QUESTIONS_COUNT = MAX_QUESTIONS;
 
 export async function getQuestions() {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
   return raw.map((r) => ({ raw: r, ...JSON.parse(r) }));
 }
+// إحصائيات حالات الأسئلة. كل سؤال أصلي بيتعد مرة واحدة (بالـ id)، والمتابعات جوه السؤال نفسه فمش بتتعد كأسئلة.
+// الحالات الموجودة فعلاً: open (جديد) / followup_pending (متابعة بانتظار رد الإدارة) / awaiting_followup (تم الرد، بانتظار العميل)
+// / archived (مغلق) / answered (قديم، بيظهر في الأرشيف). أي سؤال بدون حالة = open (زي ما اللوحة بتتعامل معاه).
+export function computeQuestionStats(list) {
+  const seen = new Set();
+  const c = { total: 0, open: 0, followupPending: 0, awaitingCustomer: 0, closed: 0, legacyAnswered: 0, other: 0 };
+  for (const x of list || []) {
+    if (!x) continue;
+    const key = x.id || x.raw;
+    if (key) { if (seen.has(key)) continue; seen.add(key); }
+    c.total++;
+    const st = x.status || "open";
+    if (st === "open") c.open++;
+    else if (st === "followup_pending") c.followupPending++;
+    else if (st === "awaiting_followup") c.awaitingCustomer++;
+    else if (st === "archived") c.closed++;
+    else if (st === "answered") c.legacyAnswered++;
+    else c.other++;
+  }
+  // الأرشيف = اللي بيظهر في تاب الأرشيف: المغلقة + القديمة المُجاب عنها
+  return { ...c, archiveTotal: c.closed + c.legacyAnswered };
+}
+
 export async function deleteQuestion(raw) { await redis(["LREM", "questions", 1, raw]); }
 
 export const FOLLOWUP_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const MAX_FOLLOWUPS = 3;
 
+// ==================== سجل العميل وحد المتابعات الإضافي ====================
+// الزيادة مرتبطة بمعرف تيليجرام للعميل (حقل داخل hash باسم fu:extra)، والحد الافتراضي MAX_FOLLOWUPS لا يتغير.
+// أي عميل بدون سجل = إضافي 0 (قيمة افتراضية آمنة للبيانات القديمة).
+export const MAX_EXTRA_PER_OPERATION = 100;
+const validChatId = (id) => /^\d{1,20}$/.test(String(id ?? ""));
+const EXTRA_KEY = "fu:extra";   // hash واحد: chatId -> عدد المتابعات الإضافية (أمر واحد لقراءة الكل في اللوحة)
+
+export async function getExtraFollowups(chatId) {
+  if (!validChatId(chatId)) return 0;
+  const v = Number((await redis(["HGET", EXTRA_KEY, String(chatId)])) ?? 0);
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+}
+export async function getAllExtras() {
+  const o = toObj((await redis(["HGETALL", EXTRA_KEY])) || []);
+  Object.keys(o).forEach((k) => { if (!(o[k] > 0)) delete o[k]; });
+  return o;
+}
+export const followupLimitFor = (extra = 0) => MAX_FOLLOWUPS + Math.max(0, Number(extra) || 0);
+
+// يزيد الحد بشكل تراكمي وذري (HINCRBY). يرجع الحد السابق والجديد.
+export async function addExtraFollowups(chatId, amount) {
+  if (!validChatId(chatId)) throw new Error("معرف العميل غير صحيح");
+  if (!Number.isInteger(amount) || amount < 1 || amount > MAX_EXTRA_PER_OPERATION) throw new Error("قيمة الزيادة غير صحيحة");
+  const res = await redis(["HINCRBY", EXTRA_KEY, String(chatId), amount]);
+  // redis() بترجّع null عند أي فشل (خطأ أو قاعدة غير مضبوطة): لازم نتأكد إن الحفظ نجح فعلاً قبل أي إشعار
+  const newExtra = typeof res === "number" ? res : (typeof res === "string" && /^\d+$/.test(res) ? Number(res) : NaN);
+  if (!Number.isInteger(newExtra) || newExtra < amount) throw new Error("فشل حفظ الزيادة");
+  const prevExtra = newExtra - amount;
+  return { prevExtra, newExtra, prevLimit: followupLimitFor(prevExtra), newLimit: followupLimitFor(newExtra) };
+}
+
+// منع تكرار نفس العملية لو الطلب اتبعت مرتين (requestId من الواجهة)
+export async function claimOperation(requestId) {
+  if (typeof requestId !== "string" || !/^[A-Za-z0-9-]{8,64}$/.test(requestId)) return false;
+  return (await redis(["SET", `op:${requestId}`, "1", "NX", "EX", 600])) === "OK";
+}
+
+// سجل عمليات زيادة الحد (بيتحفظ كامل، من غير مسح)
+export async function logLimitChange(entry) {
+  await redis(["LPUSH", "followup_log", JSON.stringify(entry)]);
+}
+export async function getLimitLog(chatId = null) {
+  const raw = (await redis(["LRANGE", "followup_log", 0, -1])) || [];
+  const all = raw.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean);
+  return chatId ? all.filter((e) => String(e.chatId) === String(chatId)) : all;
+}
+
+// آخر سؤال للعميل اتقفل بسبب وصوله للحد: يتفتح تاني عشان العميل يكمل متابعته
+export async function reopenLastLimitClosed(chatId, newLimit, now = Date.now()) {
+  const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
+  for (let i = 0; i < raw.length; i++) {   // القائمة من الأحدث للأقدم
+    let item;
+    try { item = JSON.parse(raw[i]); } catch { continue; }
+    if (String(item.chatId) !== String(chatId)) continue;
+    if (item.status === "archived" && item.closeReason === "max_followups" && (item.followups || []).length < newLimit) {
+      const updated = { ...item, status: "awaiting_followup", closedAt: null, closeReason: null, reopenedAt: now, lastActivityAt: now, followupUntil: now + FOLLOWUP_WINDOW_MS };
+      const r = await redis(["LSET", "questions", i, JSON.stringify(updated)]);
+      return r === null ? null : { ...updated, raw: JSON.stringify(updated) };
+    }
+    break; // نفحص أحدث سؤال للعميل فقط
+  }
+  return null;
+}
+
 export async function closeExpiredQuestions(now = Date.now()) {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
   const closed = [];
   for (let i = 0; i < raw.length; i++) {
     try {
@@ -148,7 +255,7 @@ export async function closeExpiredQuestions(now = Date.now()) {
 }
 
 export async function closeQuestion(ref, reason = "manual") {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
   const index = raw.findIndex((r) => {
     try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
   });
@@ -161,7 +268,7 @@ export async function closeQuestion(ref, reason = "manual") {
 }
 
 export async function questionForReply(chatId, messageId, now = Date.now()) {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
   for (let i = 0; i < raw.length; i++) {
     try {
       const item = JSON.parse(raw[i]);
@@ -173,14 +280,15 @@ export async function questionForReply(chatId, messageId, now = Date.now()) {
 }
 
 export async function addFollowup(ref, text, attachments = [], now = Date.now()) {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
   const index = raw.findIndex((r) => {
     try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
   });
   if (index < 0) return null;
   const item = JSON.parse(raw[index]);
   const followups = Array.isArray(item.followups) ? item.followups : [];
-  if (followups.length >= MAX_FOLLOWUPS) return { ...item, raw: raw[index], limitReached: true };
+  const limit = followupLimitFor(await getExtraFollowups(item.chatId).catch(() => 0));
+  if (followups.length >= limit) return { ...item, raw: raw[index], limitReached: true };
   const updated = {
     ...item,
     status: "followup_pending",
@@ -192,7 +300,7 @@ export async function addFollowup(ref, text, attachments = [], now = Date.now())
 }
 
 export async function answerQuestion(ref, answer, telegramMessageId = null) {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
   const index = raw.findIndex((r) => {
     try {
       const item = JSON.parse(r);
@@ -205,7 +313,8 @@ export async function answerQuestion(ref, answer, telegramMessageId = null) {
   if (!item.chatId) return { error: "السؤال قديم ولا يحتوي على معرّف العميل" };
   const now = Date.now();
   const followupCount = Array.isArray(item.followups) ? item.followups.length : 0;
-  const closesNow = followupCount >= MAX_FOLLOWUPS;
+  const limit = followupLimitFor(await getExtraFollowups(item.chatId).catch(() => 0));
+  const closesNow = followupCount >= limit;
   const updated = {
     ...item,
     answer: String(answer).slice(0, 3500),
@@ -224,7 +333,7 @@ export async function answerQuestion(ref, answer, telegramMessageId = null) {
 }
 
 export async function updateAnswerHistory(ref, historyIndex, answer, telegramMessageId = null) {
-  const raw = (await redis(["LRANGE", "questions", 0, 499])) || [];
+  const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
   const index = raw.findIndex((r) => {
     try { return JSON.parse(r).id === ref || r === ref; } catch { return r === ref; }
   });

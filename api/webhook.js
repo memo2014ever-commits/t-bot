@@ -1,8 +1,9 @@
 // بوت تلجرام: قايمة + رجوع + روابط + زرار سؤال + بحث بالكلمات + تحويل الطبي للخط الساخن
-import { Bot, InlineKeyboard, webhookCallback } from "grammy";
+import { Bot, InlineKeyboard, Keyboard, webhookCallback } from "grammy";
 import {
-  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, questionForReply, addFollowup, closeExpiredQuestions, maybeExpireQuestions, setPending, takePending, isBanned, setPendingImage, takePendingImage,
+  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, getIntake, DEFAULT_INTAKE_MESSAGE, questionForReply, addFollowup, closeExpiredQuestions, maybeExpireQuestions, setPending, takePending, isBanned, setPendingImage, takePendingImage,
 } from "./stats.js";
+import { phoneFeatureEnabled, claimPhonePrompt, hasPhone, savePhone, skipPhone, upsertInfo, normalizePhone } from "./customers.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
 const IMGBB_API_KEY = process.env.IMGBB_API_KEY;
@@ -60,6 +61,17 @@ const DEFAULT_FOLLOWUP_LIMIT = "تم الوصول للحد الأقصى للمت
 const DEFAULT_INQUIRY = "للاستعلام عن موعدك أو حجزك، ادخل على بوت الحجز مباشرة 👇";
 const DEFAULT_INQUIRY_WORDS = ["استعلم", "استعلام", "موعدي", "حجزي", "متابعه", "حاله الطلب", "رقم الطلب"];
 const DEFAULT_MED_WORDS = ["علاج", "دوا", "دواء", "ادويه", "اعراض", "الم", "وجع", "مرض", "جرعه", "تشخيص", "حساسيه", "حراره"];
+
+// ---- مشاركة رقم الهاتف (اختيارية بالكامل، والنصوص قابلة للتعديل من رسايل النظام) ----
+const DEFAULT_PHONE_PROMPT = "عشان نقدر نخدمك أحسن ونتواصل معاك لو احتجنا، تقدر تشارك رقم هاتفك مع الإدارة 📱\nالمشاركة اختيارية تماماً، وعدم المشاركة مش بيمنعك من استخدام البوت.";
+const DEFAULT_PHONE_SHARE_BTN = "📱 مشاركة رقم الهاتف";
+const DEFAULT_PHONE_SKIP_BTN = "⏭️ الاستمرار بدون مشاركة";
+const DEFAULT_PHONE_MENU_BTN = "📱 مشاركة رقم الهاتف (اختياري)";
+const DEFAULT_PHONE_THANKS = "تم حفظ رقمك بشكل آمن ✅ شكراً لك 🌷";
+const DEFAULT_PHONE_SKIPPED = "تمام 👍 تقدر تكمل استخدام البوت عادي. ولو حبيت تشارك رقمك بعدين هتلاقي زرار «📱 مشاركة رقم الهاتف» في القايمة الرئيسية.";
+const DEFAULT_PHONE_MISMATCH = "الرقم ده مش مسجل على حسابك في تيليجرام، فمقدرش أحفظه 🙏\nلو حابب تشارك رقمك اضغط الزرار تحت 👇";
+const DEFAULT_PHONE_ALREADY = "رقمك محفوظ عندنا بالفعل ✅";
+const DEFAULT_PHONE_ERROR = "حصلت مشكلة وأنا بحفظ الرقم، جرّب تاني بعد شوية 🙏";
 
 const fill = (t, vars) => Object.entries(vars).reduce((a, [k, v]) => a.split("{" + k + "}").join(String(v)), t);
 
@@ -195,6 +207,7 @@ function render(node, path) {
     else if (item.url) kb.url(item.label, item.url).row();
     else kb.text(item.label, `n:${path ? path + "." : ""}${i}`).row();
   });
+  if (path === "" && phoneFeatureEnabled()) kb.text(node.messages?.phoneMenuBtn || DEFAULT_PHONE_MENU_BTN, "sharephone").row();
   if (path !== "") {
     const parent = path.includes(".") ? path.slice(0, path.lastIndexOf(".")) : "";
     kb.text("🔙 رجوع", `b:${parent}`).row();
@@ -209,11 +222,74 @@ const HTML_OPTS = (markup) => ({
   link_preview_options: { is_disabled: true },
 });
 
+const phoneKeyboard = (m = {}) => new Keyboard()
+  .requestContact(m.phoneShareBtn || DEFAULT_PHONE_SHARE_BTN).row()
+  .text(m.phoneSkipBtn || DEFAULT_PHONE_SKIP_BTN)
+  .oneTime().resized();
+
+const sendPhonePrompt = (ctx, m = {}) => ctx.reply(toHtml(m.phonePrompt || DEFAULT_PHONE_PROMPT), { parse_mode: "HTML", reply_markup: phoneKeyboard(m) });
+
+// طلب الرقم: مرة واحدة فقط لكل عميل (حجز ذري). العميل القديم يشوفه عند أول تفاعل له بعد التحديث، من غير أي رسالة جماعية.
+// ما بيشتغلش خالص لو PHONE_ENC_KEY مش مضبوط. وأي فشل هنا ما يوقفش البوت.
+async function maybePromptPhone(ctx) {
+  try {
+    if (!phoneFeatureEnabled() || ctx.chat?.type !== "private" || !ctx.from) return;
+    if (!(await claimPhonePrompt(ctx.chat.id))) return;
+    if (await isBanned(ctx.chat.id)) return;
+    try { await upsertInfo(ctx.from); } catch {}
+    const m = (await getContent().catch(() => ({}))).messages || {};
+    await sendPhonePrompt(ctx, m);
+  } catch (e) { console.error("[phone] prompt failed:", e?.message); }
+}
+
+// زرار "الاستمرار بدون مشاركة" (بيوصل كرسالة نصية عادية)
+async function handlePhoneSkip(ctx, text) {
+  if (!phoneFeatureEnabled() || ctx.chat?.type !== "private") return false;
+  const content = await getContent().catch(() => ({}));
+  const m = content.messages || {};
+  if (String(text).trim() !== (m.phoneSkipBtn || DEFAULT_PHONE_SKIP_BTN)) return false;
+  try { if (await isBanned(ctx.chat.id)) return true; } catch {}
+  try { await skipPhone(ctx.from); } catch {}
+  await ctx.reply(toHtml(m.phoneSkipped || DEFAULT_PHONE_SKIPPED), { parse_mode: "HTML", reply_markup: { remove_keyboard: true } });
+  const { text: t, markup } = render(content, "");
+  await ctx.reply(toHtml(t), HTML_OPTS(markup));
+  return true;
+}
+
+// استقبال جهة الاتصال: لازم تخص نفس المستخدم (contact.user_id === from.id)، وإلا بتترفض ومتتخزنش
+bot.on("message:contact", async (ctx) => {
+  try { if (await isBanned(ctx.chat.id)) return; } catch {}
+  if (!phoneFeatureEnabled() || ctx.chat.type !== "private" || !ctx.from) return;
+  const content = await getContent().catch(() => ({}));
+  const m = content.messages || {};
+  const c = ctx.message.contact;
+  const phone = c && Number(c.user_id) === Number(ctx.from.id) ? normalizePhone(c.phone_number) : null;
+  if (!phone) return ctx.reply(toHtml(m.phoneMismatch || DEFAULT_PHONE_MISMATCH), { parse_mode: "HTML", reply_markup: phoneKeyboard(m) });
+  let ok = false;
+  try { ok = await savePhone(ctx.from, phone); } catch (e) { console.error("[phone] save failed:", e?.message); }
+  if (!ok) return ctx.reply(toHtml(m.phoneError || DEFAULT_PHONE_ERROR), { parse_mode: "HTML", reply_markup: { remove_keyboard: true } });
+  await ctx.reply(toHtml(m.phoneThanks || DEFAULT_PHONE_THANKS), { parse_mode: "HTML", reply_markup: { remove_keyboard: true } });
+  const { text, markup } = render(content, "");
+  await ctx.reply(toHtml(text), HTML_OPTS(markup));
+});
+
+// زرار القايمة الرئيسية: مشاركة الرقم لاحقاً
+bot.callbackQuery("sharephone", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  try { if (await isBanned(ctx.chat.id)) return; } catch {}
+  if (!phoneFeatureEnabled() || ctx.chat?.type !== "private") return;
+  const m = (await getContent().catch(() => ({}))).messages || {};
+  try { await claimPhonePrompt(ctx.chat.id); } catch {}   // علشان الطلب التلقائي ما يظهرش بعد كده
+  if (await hasPhone(ctx.chat.id).catch(() => false)) return ctx.reply(toHtml(m.phoneAlready || DEFAULT_PHONE_ALREADY), HTML_OPTS(render(await getContent(), "").markup));
+  return sendPhonePrompt(ctx, m);
+});
+
 bot.command("start", async (ctx) => {
   try { if (await isBanned(ctx.chat.id)) return; } catch {}
   const { text, markup } = render(await getContent(), "");
   await ctx.reply(toHtml(text), HTML_OPTS(markup));
   try { await trackVisitor(ctx.chat.id, ctx.match || ""); } catch {}
+  await maybePromptPhone(ctx);
 });
 
 async function showNode(ctx, path, track) {
@@ -225,6 +301,7 @@ async function showNode(ctx, path, track) {
     await ctx.answerCallbackQuery();
     await ctx.reply(toHtml(text), HTML_OPTS(markup));
     if (track) { try { await trackPress(path, node.label); } catch {} }
+    await maybePromptPhone(ctx);
   } catch {
     await ctx.answerCallbackQuery({ text: "المحتوى اتغير، ابعت /start", show_alert: true });
   }
@@ -258,6 +335,9 @@ async function handleAskReply(ctx, text, content, m, root, attachments = []) {
 
 // تسجيل السؤال + الشكر + المتبقي من الحد
 async function saveAndThank(ctx, text, m, root, attachments = []) {
+  // استقبال الأسئلة الجديدة متوقف؟ نعتذر قبل ما نستهلك حد العميل اليومي أو ناخد الصورة المعلقة
+  const intake = await getIntake().catch(() => ({ enabled: true }));
+  if (!intake.enabled) return ctx.reply(toHtml(intake.message || DEFAULT_INTAKE_MESSAGE), HTML_OPTS(root));
   let allowed = true;
   try { allowed = await questionAllowed(ctx.chat.id); } catch {}
   if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(root));
@@ -270,7 +350,11 @@ async function saveAndThank(ctx, text, m, root, attachments = []) {
       if (pendUrl) finalAttachments = [{ type: "image", url: pendUrl }];
     } catch {}
   }
-  try { await pushQuestion(text, ctx.chat.id, customerName, finalAttachments); } catch {}
+  try {
+    const pushed = await pushQuestion(text, ctx.chat.id, customerName, finalAttachments, ctx.from?.username || "");
+    if (pushed && pushed.ok === false) return ctx.reply(toHtml((await getIntake().catch(() => ({}))).message || DEFAULT_INTAKE_MESSAGE), HTML_OPTS(root));
+  } catch {}
+  try { if (phoneFeatureEnabled()) await upsertInfo(ctx.from); } catch {}
   const left = await questionsLeft(ctx.chat.id).catch(() => 0);
   const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
   return ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
@@ -313,6 +397,11 @@ bot.callbackQuery(/^ask:(.*)$/, async (ctx) => {
     const content = await getContent();
     const node = getNode(content, path);
     await ctx.answerCallbackQuery();
+    const intake = await getIntake().catch(() => ({ enabled: true }));
+    if (!intake.enabled) {   // الزرار ظاهر، لكن بنعتذر بدل ما نفتح خانة السؤال
+      try { await trackPress(path, node.label); } catch {}
+      return ctx.reply(toHtml(intake.message || DEFAULT_INTAKE_MESSAGE), HTML_OPTS(render(content, "").markup));
+    }
     if ((await questionsLeft(ctx.chat.id)) <= 0) {
       const lm = content.messages?.limitReached || DEFAULT_LIMIT;
       return ctx.reply(fill(lm, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(render(content, "").markup));
@@ -342,7 +431,7 @@ async function showHit(ctx, hit) {
 }
 
 // الرسايل النصية: طبي؟ ← رد على خانة السؤال؟ ← بحث بالكلمات ← رد عام
-async function handleMessage(ctx, text, msg) {
+async function handleMessageCore(ctx, text, msg) {
   try { if (await isBanned(ctx.chat.id)) return; } catch {}
   try { await trackActive(ctx.chat.id); } catch {}
   const content = await getContent().catch(() => ({}));
@@ -393,6 +482,8 @@ async function handleMessage(ctx, text, msg) {
 
   // صورة بدون reply: نرفعها لـ ImgBB ونحتفظ بالرابط مؤقتاً، ونطلب منه يكتب سؤاله
   if (!text && (msg.photo || msg.document)) {
+    const intakeNow = await getIntake().catch(() => ({ enabled: true }));
+    if (!intakeNow.enabled) return ctx.reply(toHtml(intakeNow.message || DEFAULT_INTAKE_MESSAGE), HTML_OPTS(root));
     const url = await uploadToImgBB(msg.photo ? msg.photo[msg.photo.length - 1].file_id : msg.document.file_id).catch(() => null);
     if (url) {
       try { await setPendingImage(ctx.chat.id, url); } catch {}
@@ -414,6 +505,13 @@ async function handleMessage(ctx, text, msg) {
     if (words.length) await trackUnmatched(words);
   } catch {}
   return ctx.reply(toHtml(m.fallback || DEFAULT_FALLBACK), HTML_OPTS(root));
+}
+
+async function handleMessage(ctx, text, msg) {
+  if (text && await handlePhoneSkip(ctx, text).catch(() => false)) return;
+  await handleMessageCore(ctx, text, msg);
+  // نطلب الرقم بعد الرد العادي، ومش في وسط سؤال/متابعة (عشان ما نبوّظش خانة الكتابة)
+  if (msg.text && !msg.reply_to_message) await maybePromptPhone(ctx);
 }
 
 bot.on("message:text", (ctx) => handleMessage(ctx, ctx.message.text || "", ctx.message));

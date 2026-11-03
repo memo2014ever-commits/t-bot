@@ -1,7 +1,9 @@
 // خادم لوحة التحكم: تسجيل دخول بدورين (أدمن / محرر)، وقراءة وحفظ وسجل نسخ من GitHub
 // كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
 import { timingSafeEqual, createHash } from "crypto";
-import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched, banUser, unbanUser, getBans, getBanInfo, redis } from "./stats.js";
+import { getStats, getStatsByDay, resetStats, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched, banUser, unbanUser, getBans, getBanInfo, redis,
+  getIntake, setIntake, computeQuestionStats, DEFAULT_INTAKE_MESSAGE, MAX_FOLLOWUPS, MAX_EXTRA_PER_OPERATION, getExtraFollowups, getAllExtras, followupLimitFor, addExtraFollowups, claimOperation, logLimitChange, getLimitLog, reopenLastLimitClosed } from "./stats.js";
+import { phoneFeatureEnabled, phoneSharedCount, customerMap, listCustomers, customerDetail } from "./customers.js";
 
 const {
   ADMIN_USER, ADMIN_PASS,          // الأدمن: يعدّل ويحذف
@@ -59,9 +61,9 @@ async function readCurrent(ref = GITHUB_BRANCH) {
   return { sha: j.sha, content: JSON.parse(Buffer.from(j.content, "base64").toString("utf8")) };
 }
 
-async function sendTelegram(chatId, answer, messages = {}, finalAnswer = false, followupCount = 0, imageUrl = null) {
+async function sendTelegram(chatId, answer, messages = {}, finalAnswer = false, followupCount = 0, imageUrl = null, limit = MAX_FOLLOWUPS) {
   if (!BOT_TOKEN) throw new Error("BOT_TOKEN غير مضبوط على السيرفر");
-  const text = `📩 رد على سؤالك:\n\n${answer}${finalAnswer ? "" : (followupCount > 0 ? `\n\n📩 المتابعة: ${followupCount}/3` : (messages.answerFooter || "\n\n📌 مسموح بحد أقصى 3 متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك»."))}`;
+  const text = `📩 رد على سؤالك:\n\n${answer}${finalAnswer ? "" : (followupCount > 0 ? `\n\n📩 المتابعة: ${followupCount}/${limit}` : (messages.answerFooter || `\n\n📌 مسموح بحد أقصى ${limit} متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك».`))}`;
   const replyMarkup = finalAnswer ? {} : { reply_markup: { force_reply: true, input_field_placeholder: messages.followupPlaceholder || "اكتب متابعة السؤال هنا..." } };
   let r, j;
   if (imageUrl) {
@@ -81,6 +83,8 @@ async function sendTelegram(chatId, answer, messages = {}, finalAnswer = false, 
   if (!r.ok || !j.ok) throw new Error(j.description || "فشل إرسال الإجابة إلى تيليجرام");
   return j.result;
 }
+
+const DEFAULT_LIMIT_INCREASED = "🎁 تمت زيادة عدد المتابعات المسموح لك بها 🌷\nتقدر دلوقتي تكمل متابعة استفسارك بالرد (Reply) على آخر رد وصلك من الإدارة.";
 
 async function sendCloseNotice(chatId, automatic = false, messages = {}) {
   if (!BOT_TOKEN || !chatId) return;
@@ -102,7 +106,17 @@ export default async function handler(req, res) {
     }
 
     if (action === "stats") {
-      return res.json(await getStats());
+      const st = await getStats();
+      // إحصائيات مشاركة الأرقام: بدون أي رقم هاتف. الإجمالي هو نفس "إجمالي المشتركين (تقريبي)" الموجود بالفعل
+      const shared = await phoneSharedCount().catch(() => 0);
+      const total = Math.max(Number(st.subscribersTotal) || 0, shared);
+      st.questionStats = computeQuestionStats(await getQuestions().catch(() => []));
+      st.intake = await getIntake();
+      st.phones = {
+        enabled: phoneFeatureEnabled(), shared, notShared: Math.max(0, total - shared), total,
+        rate: total > 0 ? Math.min(100, Math.round((shared / total) * 1000) / 10) : 0,
+      };
+      return res.json(st);
     }
 
     if (action === "statsDay") {
@@ -116,7 +130,11 @@ export default async function handler(req, res) {
       const expired = await closeExpiredQuestions();
       const systemMessages = (await readCurrent()).content.messages || {};
       await Promise.all(expired.map((x) => sendCloseNotice(x.chatId, true, systemMessages).catch(() => {})));
-      return res.json({ questions: await getQuestions() });
+      // extras: زيادات حد المتابعات لكل عميل (أمر Redis واحد)، والواجهة تحسب الحد = الافتراضي + الزيادة
+      const questions = await getQuestions();
+      // بيانات أصحاب الأسئلة (3 أوامر Redis مهما كان العدد). رقم الهاتف للأدمن فقط
+      const customers = await customerMap(questions.map((x) => x.chatId), { withPhones: role === "admin" }).catch(() => ({}));
+      return res.json({ questions, customers, phoneFeature: phoneFeatureEnabled(), extras: await getAllExtras().catch(() => ({})), defaultFollowupLimit: MAX_FOLLOWUPS });
     }
 
     if (action === "answerQuestion") {
@@ -131,7 +149,8 @@ export default async function handler(req, res) {
       const systemMessages = (await readCurrent()).content.messages || {};
       const followupCount = (question.followups || []).length;
       const imageUrl = typeof req.body.imageUrl === "string" && /^https:\/\//.test(req.body.imageUrl) ? req.body.imageUrl : null;
-      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages, followupCount >= 3, followupCount, imageUrl);
+      const limit = followupLimitFor(await getExtraFollowups(question.chatId).catch(() => 0));
+      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages, followupCount >= limit, followupCount, imageUrl, limit);
       const updated = await answerQuestion(ref, answer.trim(), telegramMessage.message_id);
       if (!updated || updated.error) return res.status(500).json({ error: updated?.error || "فشل تحديث حالة السؤال" });
       if (updated.status === "archived") await sendCloseNotice(updated.chatId, false, systemMessages).catch(() => {});
@@ -146,7 +165,8 @@ export default async function handler(req, res) {
       if (!question) return res.status(404).json({ error: "السؤال غير موجود" });
       if (!question.chatId) return res.status(400).json({ error: "السؤال لا يحتوي على معرّف العميل" });
       const systemMessages = (await readCurrent()).content.messages || {};
-      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages, question.status === "archived", (question.followups || []).length);
+      const editLimit = followupLimitFor(await getExtraFollowups(question.chatId).catch(() => 0));
+      const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages, question.status === "archived", (question.followups || []).length, null, editLimit);
       const updated = await updateAnswerHistory(ref, answerIndex, answer.trim(), telegramMessage.message_id);
       if (!updated || updated.error) return res.status(500).json({ error: updated?.error || "فشل تحديث الإجابة" });
       return res.json({ ok: true, question: updated });
@@ -192,6 +212,86 @@ export default async function handler(req, res) {
       const j = await r.json().catch(() => ({}));
       if (!j.success) return res.status(500).json({ error: j.error?.message || "فشل رفع الصورة" });
       return res.json({ url: j.data.url });
+    }
+
+    // ---------- مفتاح استقبال الأسئلة الجديدة ----------
+    if (action === "getIntake") {
+      return res.json({ ...(await getIntake()), defaultMessage: DEFAULT_INTAKE_MESSAGE });
+    }
+    if (action === "setIntake") {
+      if (role !== "admin") return res.status(403).json({ error: "التحكم في استقبال الأسئلة للأدمن بس" });
+      if (typeof req.body.enabled !== "boolean") return res.status(400).json({ error: "القيمة غير صحيحة" });
+      const msg = req.body.message;
+      if (msg !== undefined && (typeof msg !== "string" || msg.length > 500)) return res.status(400).json({ error: "رسالة الاعتذار حتى 500 حرف" });
+      const ok = await setIntake(req.body.enabled, msg, username);
+      if (!ok) return res.status(500).json({ error: "فشل حفظ الإعداد، لم يتم تغيير أي شيء" });
+      return res.json({ ok: true, ...(await getIntake()), defaultMessage: DEFAULT_INTAKE_MESSAGE });
+    }
+
+    // ---------- العملاء وأرقام الهواتف ----------
+    // القوائم لا تحتوي على أرقام هواتف أبداً. الرقم يظهر في customerDetail وبجوار الأسئلة للأدمن فقط
+    if (action === "customers") {
+      const filter = ["all", "shared", "notshared"].includes(req.body.filter) ? req.body.filter : "all";
+      const q = typeof req.body.q === "string" ? req.body.q.slice(0, 60) : "";
+      const rows = await listCustomers({ questions: await getQuestions(), filter, q, withPhones: role === "admin" });
+      return res.json({ customers: rows, total: rows.length });
+    }
+
+    if (action === "customerDetail") {
+      if (typeof ref !== "string" || !/^\d{1,20}$/.test(ref.trim())) return res.status(400).json({ error: "معرف العميل غير صحيح" });
+      const c = await customerDetail(ref.trim(), { withPhones: role === "admin" });
+      const mine = (await getQuestions()).filter((x) => String(x.chatId) === ref.trim());
+      const base = c || { chatId: ref.trim(), name: mine.find((x) => x.customerName)?.customerName || "", username: "", firstSeen: null, phoneState: "phone_not_requested", hasPhone: false };
+      return res.json({ customer: { ...base, questionsCount: mine.length, extraFollowups: await getExtraFollowups(ref.trim()) }, canSeePhone: role === "admin" });
+    }
+
+    // ---------- حد المتابعات لكل عميل (أدمن فقط، والتحقق هنا في السيرفر) ----------
+    if (action === "followupLimitInfo") {
+      if (role !== "admin") return res.status(403).json({ error: "تعديل حد المتابعات للأدمن بس" });
+      if (typeof ref !== "string" || !/^\d{1,20}$/.test(ref.trim())) return res.status(400).json({ error: "معرف العميل غير صحيح" });
+      const chatId = ref.trim();
+      const extra = await getExtraFollowups(chatId);
+      const mine = (await getQuestions()).filter((x) => String(x.chatId) === chatId);   // الأحدث أولاً
+      const latest = mine[0] || null;
+      const used = latest ? (latest.followups || []).length : null;
+      return res.json({
+        chatId, customerName: mine.find((x) => x.customerName)?.customerName || "",
+        defaultLimit: MAX_FOLLOWUPS, extra, totalLimit: followupLimitFor(extra),
+        used, remaining: used === null ? null : Math.max(0, followupLimitFor(extra) - used),
+        log: (await getLimitLog(chatId)).slice(0, 20),
+      });
+    }
+
+    if (action === "increaseFollowupLimit") {
+      if (role !== "admin") return res.status(403).json({ error: "تعديل حد المتابعات للأدمن بس" });
+      if (typeof ref !== "string" || !/^\d{1,20}$/.test(ref.trim())) return res.status(400).json({ error: "معرف العميل غير صحيح" });
+      const amount = req.body.amount;
+      if (!Number.isInteger(amount) || amount < 1 || amount > MAX_EXTRA_PER_OPERATION) {
+        return res.status(400).json({ error: `أدخل رقم صحيح من 1 إلى ${MAX_EXTRA_PER_OPERATION}` });
+      }
+      const chatId = ref.trim();
+      if (!(await claimOperation(req.body.requestId))) {
+        return res.status(409).json({ error: "العملية دي اتنفذت قبل كده أو الطلب غير صالح. حدّث الصفحة وراجع الحد الحالي." });
+      }
+      let change;
+      try { change = await addExtraFollowups(chatId, amount); }
+      catch (e) { await redis(["DEL", `op:${req.body.requestId}`]); return res.status(500).json({ error: "فشل حفظ الزيادة، لم يتم تغيير أي شيء" }); }
+
+      const mine = (await getQuestions()).filter((x) => String(x.chatId) === chatId);
+      const customerName = mine.find((x) => x.customerName)?.customerName || "";
+      await logLimitChange({ t: Date.now(), chatId, customerName, admin: String(username).slice(0, 50), prevLimit: change.prevLimit, added: amount, newLimit: change.newLimit }).catch(() => {});
+
+      // الإشعار بعد نجاح الحفظ فقط. فشل الإشعار ما يلغيش الزيادة.
+      let reopened = null;
+      try { reopened = await reopenLastLimitClosed(chatId, change.newLimit); } catch {}
+      let notified = false;
+      try {
+        const systemMessages = (await readCurrent()).content.messages || {};
+        const text = systemMessages.followupLimitIncreased || DEFAULT_LIMIT_INCREASED;
+        const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text }) });
+        notified = r.ok;
+      } catch {}
+      return res.json({ ok: true, ...change, notified, reopened: !!reopened });
     }
 
     if (action === "resetQuestionLimit") {
