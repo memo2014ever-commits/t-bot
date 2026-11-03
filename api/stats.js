@@ -151,7 +151,7 @@ export async function getQuestions() {
 // / archived (مغلق) / answered (قديم، بيظهر في الأرشيف). أي سؤال بدون حالة = open (زي ما اللوحة بتتعامل معاه).
 export function computeQuestionStats(list) {
   const seen = new Set();
-  const c = { total: 0, open: 0, followupPending: 0, awaitingCustomer: 0, closed: 0, legacyAnswered: 0, other: 0 };
+  const c = { total: 0, open: 0, followupPending: 0, awaitingCustomer: 0, closed: 0, legacyAnswered: 0, other: 0, closedTimeout: 0, closedMaxFollowups: 0, closedManual: 0 };
   for (const x of list || []) {
     if (!x) continue;
     const key = x.id || x.raw;
@@ -161,7 +161,13 @@ export function computeQuestionStats(list) {
     if (st === "open") c.open++;
     else if (st === "followup_pending") c.followupPending++;
     else if (st === "awaiting_followup") c.awaitingCustomer++;
-    else if (st === "archived") c.closed++;
+    else if (st === "archived") {
+      c.closed++;
+      // سبب الإغلاق: انتهت المهلة / وصل للحد / يدوي. (القديم اللي مالوش سبب مسجّل بيتحسب ضمن اليدوي)
+      if (x.closeReason === "timeout") c.closedTimeout++;
+      else if (x.closeReason === "max_followups") c.closedMaxFollowups++;
+      else c.closedManual++;
+    }
     else if (st === "answered") c.legacyAnswered++;
     else c.other++;
   }

@@ -237,7 +237,10 @@ export default async function handler(req, res) {
       const filter = ["all", "shared", "notshared"].includes(req.body.filter) ? req.body.filter : "all";
       const q = typeof req.body.q === "string" ? req.body.q.slice(0, 60) : "";
       const rows = await listCustomers({ questions: await getQuestions(), filter, q, withPhones: role === "admin" });
-      return res.json({ customers: rows, total: rows.length });
+      // تقسيم صفحات من السيرفر (50 عميل في الصفحة) علشان القايمة ما تطولش
+      const PAGE = 50, pages = Math.max(1, Math.ceil(rows.length / PAGE));
+      const page = Math.min(pages, Math.max(1, parseInt(req.body.page, 10) || 1));
+      return res.json({ customers: rows.slice((page - 1) * PAGE, page * PAGE), total: rows.length, page, pages, pageSize: PAGE });
     }
 
     if (action === "customerDetail") {
