@@ -2,7 +2,7 @@
 // كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
 import { timingSafeEqual, createHash } from "crypto";
 import { getStats, getStatsByDay, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched, banUser, unbanUser, getBans, getBanInfo, redis,
-  getIntake, setIntake, computeQuestionStats, DEFAULT_INTAKE_MESSAGE, MAX_FOLLOWUPS, MAX_EXTRA_PER_OPERATION, getExtraFollowups, getAllExtras, followupLimitFor, addExtraFollowups, claimOperation, logLimitChange, getLimitLog, reopenLastLimitClosed } from "./stats.js";
+  getIntake, setIntake, computeQuestionStats, DEFAULT_INTAKE_MESSAGE, MAX_FOLLOWUPS, MAX_EXTRA_PER_OPERATION, getExtraFollowups, getAllExtras, limitForItem, followupLimitState, adjustQuestionExtra, clearPermanentExtra, claimOperation, logLimitChange, getLimitLog } from "./stats.js";
 import { phoneFeatureEnabled, phoneSharedCount, customerMap, listCustomers, customerDetail } from "./customers.js";
 
 const {
@@ -152,7 +152,7 @@ export default async function handler(req, res) {
       const systemMessages = (await readCurrent()).content.messages || {};
       const followupCount = (question.followups || []).length;
       const imageUrl = typeof req.body.imageUrl === "string" && /^https:\/\//.test(req.body.imageUrl) ? req.body.imageUrl : null;
-      const limit = followupLimitFor(await getExtraFollowups(question.chatId).catch(() => 0));
+      const limit = limitForItem(question, await getExtraFollowups(question.chatId).catch(() => 0));
       const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages, followupCount >= limit, followupCount, imageUrl, limit);
       const updated = await answerQuestion(ref, answer.trim(), telegramMessage.message_id);
       if (!updated || updated.error) return res.status(500).json({ error: updated?.error || "فشل تحديث حالة السؤال" });
@@ -168,7 +168,7 @@ export default async function handler(req, res) {
       if (!question) return res.status(404).json({ error: "السؤال غير موجود" });
       if (!question.chatId) return res.status(400).json({ error: "السؤال لا يحتوي على معرّف العميل" });
       const systemMessages = (await readCurrent()).content.messages || {};
-      const editLimit = followupLimitFor(await getExtraFollowups(question.chatId).catch(() => 0));
+      const editLimit = limitForItem(question, await getExtraFollowups(question.chatId).catch(() => 0));
       const telegramMessage = await sendTelegram(question.chatId, answer.trim(), systemMessages, question.status === "archived", (question.followups || []).length, null, editLimit);
       const updated = await updateAnswerHistory(ref, answerIndex, answer.trim(), telegramMessage.message_id);
       if (!updated || updated.error) return res.status(500).json({ error: updated?.error || "فشل تحديث الإجابة" });
@@ -256,23 +256,22 @@ export default async function handler(req, res) {
       if (role !== "admin") return res.status(403).json({ error: "تعديل حد المتابعات للأدمن بس" });
       if (typeof ref !== "string" || !/^\d{1,20}$/.test(ref.trim())) return res.status(400).json({ error: "معرف العميل غير صحيح" });
       const chatId = ref.trim();
-      const extra = await getExtraFollowups(chatId);
-      const mine = (await getQuestions()).filter((x) => String(x.chatId) === chatId);   // الأحدث أولاً
-      const latest = mine[0] || null;
-      const used = latest ? (latest.followups || []).length : null;
+      const st = await followupLimitState(chatId);
+      const mine = (await getQuestions()).filter((x) => String(x.chatId) === chatId);
       return res.json({
-        chatId, customerName: mine.find((x) => x.customerName)?.customerName || "",
-        defaultLimit: MAX_FOLLOWUPS, extra, totalLimit: followupLimitFor(extra),
-        used, remaining: used === null ? null : Math.max(0, followupLimitFor(extra) - used),
-        log: (await getLimitLog(chatId)).slice(0, 20),
+        chatId, customerName: mine.find((x) => x.customerName)?.customerName || "", defaultLimit: MAX_FOLLOWUPS,
+        ...st, log: (await getLimitLog(chatId)).slice(0, 20),
       });
     }
 
-    if (action === "increaseFollowupLimit") {
+    // زيادة / نقص / حذف: بتخص السؤال الحالي للعميل وبتنتهي بانتهائه. "clearPermanent" بيحذف الإضافي الدائم القديم.
+    if (action === "adjustFollowupLimit" || action === "increaseFollowupLimit") {
       if (role !== "admin") return res.status(403).json({ error: "تعديل حد المتابعات للأدمن بس" });
       if (typeof ref !== "string" || !/^\d{1,20}$/.test(ref.trim())) return res.status(400).json({ error: "معرف العميل غير صحيح" });
+      const op = action === "increaseFollowupLimit" ? "add" : req.body.op;
+      if (!["add", "sub", "clear", "clearPermanent"].includes(op)) return res.status(400).json({ error: "عملية غير معروفة" });
       const amount = req.body.amount;
-      if (!Number.isInteger(amount) || amount < 1 || amount > MAX_EXTRA_PER_OPERATION) {
+      if ((op === "add" || op === "sub") && (!Number.isInteger(amount) || amount < 1 || amount > MAX_EXTRA_PER_OPERATION)) {
         return res.status(400).json({ error: `أدخل رقم صحيح من 1 إلى ${MAX_EXTRA_PER_OPERATION}` });
       }
       const chatId = ref.trim();
@@ -280,24 +279,27 @@ export default async function handler(req, res) {
         return res.status(409).json({ error: "العملية دي اتنفذت قبل كده أو الطلب غير صالح. حدّث الصفحة وراجع الحد الحالي." });
       }
       let change;
-      try { change = await addExtraFollowups(chatId, amount); }
-      catch (e) { await redis(["DEL", `op:${req.body.requestId}`]); return res.status(500).json({ error: "فشل حفظ الزيادة، لم يتم تغيير أي شيء" }); }
-
+      try { change = op === "clearPermanent" ? await clearPermanentExtra(chatId) : await adjustQuestionExtra(chatId, op, amount); }
+      catch (e) { change = { error: "فشل حفظ التغيير، لم يتم تغيير أي شيء", fatal: true }; }
+      if (change.error) {
+        await redis(["DEL", `op:${req.body.requestId}`]);   // العملية ما حصلتش: نسمح بإعادة المحاولة
+        return res.status(change.fatal ? 500 : 400).json({ error: change.error });
+      }
       const mine = (await getQuestions()).filter((x) => String(x.chatId) === chatId);
       const customerName = mine.find((x) => x.customerName)?.customerName || "";
-      await logLimitChange({ t: Date.now(), chatId, customerName, admin: String(username).slice(0, 50), prevLimit: change.prevLimit, added: amount, newLimit: change.newLimit }).catch(() => {});
+      await logLimitChange({ t: Date.now(), chatId, customerName, admin: String(username).slice(0, 50), op, scope: op === "clearPermanent" ? "permanent" : "question", questionId: change.questionId || null, prevLimit: change.prevLimit, added: change.delta, newLimit: change.newLimit }).catch(() => {});
 
-      // الإشعار بعد نجاح الحفظ فقط. فشل الإشعار ما يلغيش الزيادة.
-      let reopened = null;
-      try { reopened = await reopenLastLimitClosed(chatId, change.newLimit); } catch {}
+      // الإشعار للعميل بعد نجاح الحفظ، وللزيادة فقط (مش للنقص أو الحذف). فشل الإشعار ما يلغيش التغيير.
       let notified = false;
-      try {
-        const systemMessages = (await readCurrent()).content.messages || {};
-        const text = systemMessages.followupLimitIncreased || DEFAULT_LIMIT_INCREASED;
-        const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text }) });
-        notified = r.ok;
-      } catch {}
-      return res.json({ ok: true, ...change, notified, reopened: !!reopened });
+      if (op === "add") {
+        try {
+          const systemMessages = (await readCurrent()).content.messages || {};
+          const text = systemMessages.followupLimitIncreased || DEFAULT_LIMIT_INCREASED;
+          const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text }) });
+          notified = r.ok;
+        } catch {}
+      }
+      return res.json({ ok: true, op, prevLimit: change.prevLimit, newLimit: change.newLimit, delta: change.delta, notified, reopened: !!change.reopened });
     }
 
     if (action === "resetQuestionLimit") {

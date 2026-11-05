@@ -199,17 +199,76 @@ export async function getAllExtras() {
 }
 export const followupLimitFor = (extra = 0) => MAX_FOLLOWUPS + Math.max(0, Number(extra) || 0);
 
-// يزيد الحد بشكل تراكمي وذري (HINCRBY). يرجع الحد السابق والجديد.
-export async function addExtraFollowups(chatId, amount) {
-  if (!validChatId(chatId)) throw new Error("معرف العميل غير صحيح");
-  if (!Number.isInteger(amount) || amount < 1 || amount > MAX_EXTRA_PER_OPERATION) throw new Error("قيمة الزيادة غير صحيحة");
-  const res = await redis(["HINCRBY", EXTRA_KEY, String(chatId), amount]);
-  // redis() بترجّع null عند أي فشل (خطأ أو قاعدة غير مضبوطة): لازم نتأكد إن الحفظ نجح فعلاً قبل أي إشعار
-  const newExtra = typeof res === "number" ? res : (typeof res === "string" && /^\d+$/.test(res) ? Number(res) : NaN);
-  if (!Number.isInteger(newExtra) || newExtra < amount) throw new Error("فشل حفظ الزيادة");
-  const prevExtra = newExtra - amount;
-  return { prevExtra, newExtra, prevLimit: followupLimitFor(prevExtra), newLimit: followupLimitFor(newExtra) };
+// ---- حد المتابعات لكل سؤال ----
+// الحد الفعلي للسؤال = 3 (الافتراضي) + extraFollowups المخزنة على السؤال نفسه (بتنتهي بانتهاء السؤال)
+//                    + الإضافي الدائم القديم للعميل (fu:extra، بيتحذف من نافذة الحد، ومبيتضافش عليه تاني).
+export const limitForItem = (item, permanent = 0) =>
+  MAX_FOLLOWUPS + Math.max(0, Number(permanent) || 0) + Math.max(0, Number(item?.extraFollowups) || 0);
+const ACTIVE_STATUSES = ["open", "awaiting_followup", "followup_pending"];
+
+// أحدث سؤال للعميل (القائمة من الأحدث للأقدم)
+async function latestQuestionOf(chatId) {
+  const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
+  for (let i = 0; i < raw.length; i++) {
+    let item; try { item = JSON.parse(raw[i]); } catch { continue; }
+    if (String(item.chatId) === String(chatId)) return { index: i, item };
+  }
+  return null;
 }
+
+export async function followupLimitState(chatId) {
+  const permanent = await getExtraFollowups(chatId);
+  const found = await latestQuestionOf(chatId);
+  const item = found?.item || null;
+  const reopenable = !!item && item.status === "archived" && item.closeReason === "max_followups";
+  const active = !!item && (ACTIVE_STATUSES.includes(item.status || "open") || reopenable);
+  const questionExtra = Math.max(0, Number(item?.extraFollowups) || 0);
+  const totalLimit = item ? limitForItem(item, permanent) : MAX_FOLLOWUPS + permanent;
+  const used = item ? (item.followups || []).length : null;
+  return {
+    permanentExtra: permanent, questionId: item?.id || null, questionStatus: item?.status || null, questionExtra,
+    totalLimit, used, remaining: used === null ? null : Math.max(0, totalLimit - used), canAdjust: active, reopenable,
+  };
+}
+
+// add / sub / clear على سؤال العميل الشغّال (أو آخر سؤال اتقفل بسبب الحد، فبيتفتح). مبيمسّش أي سؤال تاني.
+export async function adjustQuestionExtra(chatId, op, amount = 0, now = Date.now()) {
+  if (!validChatId(chatId)) return { error: "معرف العميل غير صحيح" };
+  if (!["add", "sub", "clear"].includes(op)) return { error: "عملية غير معروفة" };
+  if (op !== "clear" && (!Number.isInteger(amount) || amount < 1 || amount > MAX_EXTRA_PER_OPERATION)) return { error: `أدخل رقم صحيح من 1 إلى ${MAX_EXTRA_PER_OPERATION}` };
+  const found = await latestQuestionOf(chatId);
+  if (!found) return { error: "العميل ده مالوش أسئلة" };
+  const { index, item } = found;
+  const reopen = op === "add" && item.status === "archived" && item.closeReason === "max_followups";
+  if (!ACTIVE_STATUSES.includes(item.status || "open") && !reopen) {
+    return { error: "مفيش سؤال شغّال للعميل ده. الزيادة بتتطبق على السؤال المفتوح بس (وبتنتهي بانتهائه)." };
+  }
+  const permanent = await getExtraFollowups(chatId);
+  const cur = Math.max(0, Number(item.extraFollowups) || 0);
+  if (op === "sub" && amount > cur) return { error: cur ? `زيادة السؤال الحالية ${cur} فقط، مينفعش تنقّص أكتر منها` : "مفيش زيادة على السؤال ده عشان تتنقّص" };
+  if (op === "clear" && cur === 0) return { error: "مفيش زيادة على السؤال ده" };
+  const next = op === "add" ? cur + amount : op === "sub" ? cur - amount : 0;
+  const prevLimit = limitForItem(item, permanent), newLimit = limitForItem({ extraFollowups: next }, permanent);
+  let updated = { ...item, extraFollowups: next };
+  if (next === 0) delete updated.extraFollowups;
+  if (reopen && (item.followups || []).length < newLimit) {
+    updated = { ...updated, status: "awaiting_followup", closedAt: null, closeReason: null, reopenedAt: now, lastActivityAt: now, followupUntil: now + FOLLOWUP_WINDOW_MS };
+  }
+  const r = await redis(["LSET", "questions", index, JSON.stringify(updated)]);
+  if (r === null) return { error: "فشل حفظ التغيير، لم يتم تغيير أي شيء", fatal: true };
+  return { ok: true, questionId: item.id, prevLimit, newLimit, delta: next - cur, reopened: reopen && updated.status === "awaiting_followup" };
+}
+
+// حذف الإضافي الدائم القديم للعميل (اللي اتعمل قبل ما الزيادة تبقى للسؤال الحالي)
+export async function clearPermanentExtra(chatId) {
+  if (!validChatId(chatId)) return { error: "معرف العميل غير صحيح" };
+  const prev = await getExtraFollowups(chatId);
+  if (prev === 0) return { error: "مفيش إضافي دائم للعميل ده" };
+  const r = await redis(["HDEL", EXTRA_KEY, String(chatId)]);
+  if (r === null) return { error: "فشل الحذف، لم يتم تغيير أي شيء", fatal: true };
+  return { ok: true, prevExtra: prev, prevLimit: MAX_FOLLOWUPS + prev, newLimit: MAX_FOLLOWUPS, delta: -prev };
+}
+
 
 // منع تكرار نفس العملية لو الطلب اتبعت مرتين (requestId من الواجهة)
 export async function claimOperation(requestId) {
@@ -227,22 +286,6 @@ export async function getLimitLog(chatId = null) {
   return chatId ? all.filter((e) => String(e.chatId) === String(chatId)) : all;
 }
 
-// آخر سؤال للعميل اتقفل بسبب وصوله للحد: يتفتح تاني عشان العميل يكمل متابعته
-export async function reopenLastLimitClosed(chatId, newLimit, now = Date.now()) {
-  const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
-  for (let i = 0; i < raw.length; i++) {   // القائمة من الأحدث للأقدم
-    let item;
-    try { item = JSON.parse(raw[i]); } catch { continue; }
-    if (String(item.chatId) !== String(chatId)) continue;
-    if (item.status === "archived" && item.closeReason === "max_followups" && (item.followups || []).length < newLimit) {
-      const updated = { ...item, status: "awaiting_followup", closedAt: null, closeReason: null, reopenedAt: now, lastActivityAt: now, followupUntil: now + FOLLOWUP_WINDOW_MS };
-      const r = await redis(["LSET", "questions", i, JSON.stringify(updated)]);
-      return r === null ? null : { ...updated, raw: JSON.stringify(updated) };
-    }
-    break; // نفحص أحدث سؤال للعميل فقط
-  }
-  return null;
-}
 
 export async function closeExpiredQuestions(now = Date.now()) {
   const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
@@ -293,7 +336,7 @@ export async function addFollowup(ref, text, attachments = [], now = Date.now())
   if (index < 0) return null;
   const item = JSON.parse(raw[index]);
   const followups = Array.isArray(item.followups) ? item.followups : [];
-  const limit = followupLimitFor(await getExtraFollowups(item.chatId).catch(() => 0));
+  const limit = limitForItem(item, await getExtraFollowups(item.chatId).catch(() => 0));
   if (followups.length >= limit) return { ...item, raw: raw[index], limitReached: true };
   const updated = {
     ...item,
@@ -319,7 +362,7 @@ export async function answerQuestion(ref, answer, telegramMessageId = null) {
   if (!item.chatId) return { error: "السؤال قديم ولا يحتوي على معرّف العميل" };
   const now = Date.now();
   const followupCount = Array.isArray(item.followups) ? item.followups.length : 0;
-  const limit = followupLimitFor(await getExtraFollowups(item.chatId).catch(() => 0));
+  const limit = limitForItem(item, await getExtraFollowups(item.chatId).catch(() => 0));
   const closesNow = followupCount >= limit;
   const updated = {
     ...item,
