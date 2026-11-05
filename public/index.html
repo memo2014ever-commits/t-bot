@@ -1607,7 +1607,21 @@ function threadEvents(item) {
   const ev = [{ kind: "q", t: item.t || 0, text: item.q, attachments: item.attachments || [], ord: 0 }];
   answerEntries(item).forEach((a, i) => ev.push({ kind: "a", t: a.t || 0, text: a.text || "", idx: i, ord: 1 }));
   (item.followups || []).forEach((f, i) => ev.push({ kind: "f", t: f.t || 0, text: f.text || "", attachments: f.attachments || [], n: i + 1, ord: 2 }));
-  return ev.map((e, seq) => ({ ...e, seq })).sort((a, b) => a.t - b.t || a.ord - b.ord || a.seq - b.seq);
+  const sorted = ev.map((e, seq) => ({ ...e, seq })).sort((a, b) => a.t - b.t || a.ord - b.ord || a.seq - b.seq);
+  // كل رد بياخد اسم اللي بيرد عليه (السؤال أو المتابعة رقم كذا) بدل رقم عام، علشان ما يحصلش لخبطة
+  let target = { label: "السؤال", count: 0 };
+  for (const e of sorted) {
+    if (e.kind === "q") target = { label: "السؤال", count: 0 };
+    else if (e.kind === "f") target = { label: `المتابعة ${e.n}`, count: 0 };
+    else {
+      target.count++;
+      e.label = `الرد على ${target.label}` + (target.count > 1 ? ` · رد إضافي${target.count > 2 ? " " + (target.count - 1) : ""}` : "");
+    }
+  }
+  return sorted;
+}
+function answerLabel(item, idx) {
+  return threadEvents(item).find((e) => e.kind === "a" && e.idx === idx)?.label || `الإجابة ${idx + 1}`;
 }
 function imgsHtml(list, w = 180, h = 140) {
   return (list || []).map((a) => `<br><a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" style="max-width:${w}px;max-height:${h}px;border-radius:8px;margin-top:6px;display:block"></a>`).join("");
@@ -1618,7 +1632,7 @@ function threadHtml(item, { highlightLast = false } = {}) {
   return evs.map((e) => {
     const time = `<br><span class="muted">${esc(fmtTime(e.t))}</span>`;
     if (e.kind === "q") return `<div class="card tl tl-q" style="margin:7px 0;padding:9px;border-right:3px solid #98a2b3"><b>❓ السؤال</b><br><span style="white-space:pre-wrap">${esc(e.text || "")}</span>${imgsHtml(e.attachments)}${time}</div>`;
-    if (e.kind === "a") return `<div class="card tl tl-a" style="margin:7px 0;padding:9px;background:var(--soft)"><b>✅ الإجابة ${e.idx + 1}</b><br><span style="white-space:pre-wrap">${esc(e.text)}</span>${time}<br><button class="ghost" style="margin-top:4px" onclick='editAnswerHistory(${JSON.stringify(item.id)}, ${e.idx})'>📝 تعديل</button></div>`;
+    if (e.kind === "a") return `<div class="card tl tl-a" style="margin:7px 0;padding:9px;background:var(--soft)"><b>✅ ${esc(e.label)}</b><br><span style="white-space:pre-wrap">${esc(e.text)}</span>${time}<br><button class="ghost" style="margin-top:4px" onclick='editAnswerHistory(${JSON.stringify(item.id)}, ${e.idx})'>📝 تعديل</button></div>`;
     const hl = lastF && e === lastF;
     return `<div class="card tl tl-f${hl ? " tl-hl" : ""}" style="margin:7px 0;padding:9px;border-right:3px solid var(--accent)${hl ? ";background:#fffaeb" : ""}"><b>📩 متابعة ${e.n}</b>${hl ? ' <span class="status warn">جديدة بانتظار الرد</span>' : ""}<br><span style="white-space:pre-wrap">${esc(e.text)}</span>${imgsHtml(e.attachments)}${time}</div>`;
   }).join("");
@@ -1693,7 +1707,7 @@ async function editAnswerHistory(id, answerIndex) {
   const result = await new Promise((resolve) => {
     const bg = document.createElement("div");
     bg.className = "modal-bg";
-    bg.innerHTML = `<div class="modal"><h2 style="margin:0 0 10px">📝 تعديل الإجابة ${answerIndex + 1}</h2>
+    bg.innerHTML = `<div class="modal"><h2 style="margin:0 0 10px">📝 تعديل: ${esc(answerLabel(item, answerIndex))}</h2>
       <p class="muted">سيتم إرسال النسخة المعدلة للعميل، وتظل بقية الإجابات كما هي.</p>
       <textarea id="history-answer-edit" rows="7">${esc(entry.text || "")}</textarea>
       <div class="row" style="margin-top:12px"><button class="ok" data-r="1">📤 تعديل وإعادة الإرسال</button><button class="ghost" data-r="0">إلغاء</button></div></div>`;
