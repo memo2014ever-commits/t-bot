@@ -1146,7 +1146,8 @@ function esc(v) {
 // ---------- الأسئلة ----------
 let questionsCache = [];
 let extrasCache = {}, defaultFuLimit = 3;   // زيادات حد المتابعات لكل عميل (من السيرفر)
-const fuLimit = (chatId) => defaultFuLimit + (Number(extrasCache[String(chatId)]) || 0);
+const fuLimit = (chatId) => defaultFuLimit + (Number(extrasCache[String(chatId)]) || 0);   // الإضافي الدائم القديم فقط
+const fuLimitQ = (x) => fuLimit(x.chatId) + (Number(x.extraFollowups) || 0);   // حد سؤال معيّن = الافتراضي + الدائم القديم + زيادة السؤال
 const PAGE_SIZE = 50;   // نرسم 50 صف بس في المرة (الباقي بزرار "عرض المزيد") علشان الصفحة ما تتقلش
 let qLimit = PAGE_SIZE, aLimit = PAGE_SIZE, lastQSig = "", lastASig = "";
 let customersCache = {};   // chatId -> بيانات العميل (الاسم/username/الرقم للأدمن فقط/حالة المشاركة)
@@ -1176,50 +1177,63 @@ async function openLimitDialog(chatId) {
   const requestId = crypto.randomUUID();   // يمنع تنفيذ نفس الطلب مرتين
   const bg = document.createElement("div");
   bg.className = "modal-bg";
-  const logRows = (info.log || []).map((l) => `<tr><td>${esc(fmtTime(l.t))}</td><td>${esc(l.admin)}</td><td>${esc(l.prevLimit)}</td><td>+${esc(l.added)}</td><td>${esc(l.newLimit)}</td></tr>`).join("");
-  bg.innerHTML = `<div class="modal" style="width:min(460px,100%)">
+  const OP = { add: "➕ زيادة", sub: "➖ نقص", clear: "🗑 حذف زيادة السؤال", clearPermanent: "🗑 حذف الإضافي الدائم" };
+  const logRows = (info.log || []).map((l) => `<tr><td>${esc(fmtTime(l.t))}</td><td>${esc(l.admin)}</td><td>${esc(OP[l.op] || "➕ زيادة (قديمة ودائمة)")}</td><td>${esc(l.prevLimit)}</td><td dir="ltr">${l.added > 0 ? "+" : ""}${esc(l.added)}</td><td>${esc(l.newLimit)}</td></tr>`).join("");
+  const stLabel = { open: "جديد", awaiting_followup: "بانتظار متابعة العميل", followup_pending: "متابعة بانتظار الرد", archived: "مغلق", answered: "مؤرشف" }[info.questionStatus] || "";
+  const can = info.canAdjust;
+  bg.innerHTML = `<div class="modal" style="width:min(480px,100%)">
     <h2 style="margin:0 0 10px">➕ حد المتابعات</h2>
     <div class="card" style="padding:12px;margin-bottom:10px;line-height:1.9">
       <b>${esc(info.customerName || "غير معروف")}</b><br>
       <span class="muted">Telegram User ID:</span> <span dir="ltr">${esc(info.chatId)}</span><br>
       <span class="muted">الحد الافتراضي:</span> ${info.defaultLimit}<br>
-      <span class="muted">الإضافي السابق:</span> ${info.extra}<br>
-      <span class="muted">الحد الإجمالي الحالي:</span> <b>${info.totalLimit}</b><br>
-      <span class="muted">آخر سؤال للعميل:</span> ${info.used === null ? "لا يوجد سؤال" : `استخدم ${info.used} · متبقي ${info.remaining}`}
+      <span class="muted">زيادة السؤال الحالي:</span> ${info.questionExtra} <span class="muted">(بتنتهي بانتهاء السؤال)</span><br>
+      ${info.permanentExtra ? `<span class="muted">إضافي دائم (قديم):</span> ${info.permanentExtra}<br>` : ""}
+      <span class="muted">الحد الإجمالي للسؤال الحالي:</span> <b>${info.totalLimit}</b><br>
+      <span class="muted">السؤال الحالي:</span> ${info.questionId ? `${esc(stLabel)} · استخدم ${info.used} · متبقي ${info.remaining}` : "لا يوجد سؤال"}
     </div>
-    <label class="f">عدد المتابعات الإضافية (رقم صحيح من 1 إلى 100)</label>
-    <input id="lim-amount" type="number" min="1" max="100" step="1" inputmode="numeric" placeholder="مثال: 5">
+    ${can ? "" : '<div class="status warn" style="margin-bottom:8px">مفيش سؤال شغّال للعميل ده، فالزيادة والنقص غير متاحين. الزيادة بتتطبق على السؤال المفتوح بس.</div>'}
+    <label class="f">عدد المتابعات (رقم صحيح من 1 إلى 100)</label>
+    <input id="lim-amount" type="number" min="1" max="100" step="1" inputmode="numeric" placeholder="مثال: 5" ${can ? "" : "disabled"}>
     <div id="lim-preview" class="muted" style="margin-top:6px"></div>
     <div id="lim-err" class="status" style="color:var(--bad);margin-top:6px"></div>
-    <div class="row" style="margin-top:12px">
-      <button class="ok" id="lim-ok">تأكيد</button>
-      <button class="ghost" id="lim-cancel">إلغاء</button>
+    <div class="row" style="margin-top:12px;justify-content:flex-start;flex-wrap:wrap">
+      <button class="ok" id="lim-add" ${can ? "" : "disabled"}>➕ زيادة</button>
+      <button class="ghost" id="lim-sub" ${can && info.questionExtra ? "" : "disabled"}>➖ نقص</button>
+      <button class="danger" id="lim-clear" ${can && info.questionExtra ? "" : "disabled"}>🗑 حذف زيادة السؤال</button>
     </div>
-    ${logRows ? `<h3 style="margin:16px 0 6px;font-size:14px">سجل العمليات لهذا العميل</h3><div style="overflow:auto;max-height:160px"><table><tr><th>الوقت</th><th>المسؤول</th><th>السابق</th><th>الزيادة</th><th>الجديد</th></tr>${logRows}</table></div>` : ""}
+    ${info.permanentExtra ? `<div style="margin-top:8px"><button class="danger" id="lim-clearp">🗑 حذف الإضافي الدائم (${info.permanentExtra})</button></div>` : ""}
+    <div class="row" style="margin-top:12px"><button class="ghost" id="lim-cancel">إغلاق</button></div>
+    ${logRows ? `<h3 style="margin:16px 0 6px;font-size:14px">سجل العمليات لهذا العميل</h3><div style="overflow:auto;max-height:160px"><table><tr><th>الوقت</th><th>المسؤول</th><th>العملية</th><th>السابق</th><th>التغيير</th><th>الجديد</th></tr>${logRows}</table></div>` : ""}
   </div>`;
   document.body.appendChild(bg);
-  const input = bg.querySelector("#lim-amount"), err = bg.querySelector("#lim-err"), okBtn = bg.querySelector("#lim-ok");
+  const input = bg.querySelector("#lim-amount"), err = bg.querySelector("#lim-err");
   const parse = () => { const v = input.value.trim(); return /^\d+$/.test(v) && +v >= 1 && +v <= 100 ? +v : null; };
+  const badMsg = "أدخل رقم صحيح من 1 إلى 100 (بدون صفر أو سالب أو كسور)";
   input.addEventListener("input", () => {
     const n = parse();
-    err.textContent = input.value.trim() && n === null ? "أدخل رقم صحيح من 1 إلى 100 (بدون صفر أو سالب أو كسور)" : "";
-    bg.querySelector("#lim-preview").textContent = n === null ? "" : `الحد الجديد سيكون: ${info.totalLimit + n}`;
+    err.textContent = input.value.trim() && n === null ? badMsg : "";
+    bg.querySelector("#lim-preview").textContent = n === null ? "" : `بعد الزيادة: ${info.totalLimit + n}${info.questionExtra >= n ? ` · بعد النقص: ${info.totalLimit - n}` : ""}`;
   });
   const close = () => bg.remove();
   bg.querySelector("#lim-cancel").onclick = close;
   bg.addEventListener("click", (e) => { if (e.target === bg) close(); });
-  okBtn.onclick = async () => {
-    const n = parse();
-    if (n === null) { err.textContent = "أدخل رقم صحيح من 1 إلى 100 (بدون صفر أو سالب أو كسور)"; return; }
-    okBtn.disabled = true;
+  const run = async (op, needAmount, confirmText) => {
+    let amount;
+    if (needAmount) { amount = parse(); if (amount === null) { err.textContent = badMsg; return; } }
+    if (confirmText && !confirm(confirmText)) return;
+    bg.querySelectorAll("button").forEach((b) => (b.disabled = true));
     try {
-      const r = await api("increaseFollowupLimit", { ref: String(chatId), amount: n, requestId });
-      toast(`تمت زيادة الحد: ${r.prevLimit} ← ${r.newLimit}${r.reopened ? " (وتم فتح آخر سؤال للمتابعة)" : ""}`, "ok");
-      if (!r.notified) toast("تم حفظ الزيادة لكن تعذّر إرسال الإشعار للعميل", "bad");
-      close();
-      loadQuestions();
-    } catch (e) { err.textContent = e.message; okBtn.disabled = false; }
+      const r = await api("adjustFollowupLimit", { ref: String(chatId), op, amount, requestId });
+      toast(`${OP[op]}: الحد ${r.prevLimit} ← ${r.newLimit}${r.reopened ? " (وتم فتح آخر سؤال للمتابعة)" : ""}`, "ok");
+      if (op === "add" && !r.notified) toast("تم حفظ الزيادة لكن تعذّر إرسال الإشعار للعميل", "bad");
+      close(); loadQuestions();
+    } catch (e) { err.textContent = e.message; bg.querySelectorAll("button").forEach((b) => (b.disabled = false)); }
   };
+  bg.querySelector("#lim-add").onclick = () => run("add", true);
+  bg.querySelector("#lim-sub").onclick = () => run("sub", true);
+  bg.querySelector("#lim-clear").onclick = () => run("clear", false, "حذف كل زيادة المتابعات على السؤال الحالي؟ الحد هيرجع للافتراضي.");
+  const cp = bg.querySelector("#lim-clearp"); if (cp) cp.onclick = () => run("clearPermanent", false, "حذف الإضافي الدائم لهذا العميل؟ الحد هيرجع للافتراضي.");
   input.focus();
 }
 
@@ -1523,7 +1537,7 @@ function renderQuestions() {
       <td>${counts[normQ(x.q)] > 1 ? `<span class="chip">${counts[normQ(x.q)]}</span>` : "1"}</td>
       <td>${fmtTime(pendingFollowup(x)?.t || x.t)}</td>
       <td style="min-width:280px">
-        ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">المتابعات: ${x.followups?.length || 0}/${fuLimit(x.chatId)}<br>${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><div class="answer-toolbar"><label class="file-label" onclick="event.stopPropagation()"><span id="answer-img-name-${esc(x.id)}">📎 إرفاق صورة</span><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" onchange="this.closest('.file-label').querySelector('span').textContent=this.files[0]?.name||'📎 إرفاق صورة'"></label><button class="ok" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد<br><button class="ghost" style="margin-top:6px" onclick='showFollowup(${JSON.stringify(x.id)})'>📩 عرض متابعة العميل</button><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><div class="answer-toolbar"><label class="file-label" onclick="event.stopPropagation()"><span id="answer-img-name-${esc(x.id)}">📎 إرفاق صورة</span><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" onchange="this.closest('.file-label').querySelector('span').textContent=this.files[0]?.name||'📎 إرفاق صورة'"></label><button class="ok" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><div class="answer-toolbar"><label class="file-label" onclick="event.stopPropagation()"><span id="answer-img-name-${esc(x.id)}">📎 إرفاق صورة</span><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" onchange="this.closest('.file-label').querySelector('span').textContent=this.files[0]?.name||'📎 إرفاق صورة'"></label><button class="ok" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
+        ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">المتابعات: ${x.followups?.length || 0}/${fuLimitQ(x)}<br>${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><div class="answer-toolbar"><label class="file-label" onclick="event.stopPropagation()"><span id="answer-img-name-${esc(x.id)}">📎 إرفاق صورة</span><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" onchange="this.closest('.file-label').querySelector('span').textContent=this.files[0]?.name||'📎 إرفاق صورة'"></label><button class="ok" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد<br><button class="ghost" style="margin-top:6px" onclick='showFollowup(${JSON.stringify(x.id)})'>📩 عرض متابعة العميل</button><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><div class="answer-toolbar"><label class="file-label" onclick="event.stopPropagation()"><span id="answer-img-name-${esc(x.id)}">📎 إرفاق صورة</span><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" onchange="this.closest('.file-label').querySelector('span').textContent=this.files[0]?.name||'📎 إرفاق صورة'"></label><button class="ok" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><div class="answer-toolbar"><label class="file-label" onclick="event.stopPropagation()"><span id="answer-img-name-${esc(x.id)}">📎 إرفاق صورة</span><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" onchange="this.closest('.file-label').querySelector('span').textContent=this.files[0]?.name||'📎 إرفاق صورة'"></label><button class="ok" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
       </td>
       <td>${x.chatId ? `<button class="ghost" style="margin-bottom:6px" onclick='showCustomerHistory(${JSON.stringify(x.chatId)})'>👤 سجل العميل (${custIdx[String(x.chatId)]?.n || 0})</button>` : ""}${x.chatId && role === "admin" ? limitBtn(x.chatId) : ""}<button class="ghost" style="margin-bottom:6px" onclick='closeQuestionFromPanel(${JSON.stringify(x.id)})'>🔒 إغلاق</button>${x.chatId && role === "admin" ? `<button class="danger" style="margin-bottom:6px" onclick='openBanDialog(${JSON.stringify(x.chatId)}, ${JSON.stringify(x.customerName || "")})'>🚫 حظر</button>` : ""}<button class="danger" onclick="deleteQ(${JSON.stringify(x.raw).replace(/"/g, "&quot;")})">🗑</button></td>
     </tr>`).join("") + moreRow(rows.length, qShown.length, "qLimit += PAGE_SIZE; renderQuestions()");
@@ -2003,7 +2017,7 @@ async function openCustomerDetail(chatId) {
       📌 حالة المشاركة: ${PHONE_STATE_LABEL[c.phoneState] || ""}<br>
       🗓 أول تفاعل مسجل: ${c.firstSeen ? esc(fmtTime(c.firstSeen)) : "—"}<br>
       💬 عدد الأسئلة المسجلة: ${c.questionsCount}<br>
-      ➕ متابعات إضافية: ${c.extraFollowups}
+      ➕ إضافي دائم (قديم): ${c.extraFollowups}
     </div>
     <div class="row" style="margin-top:12px;justify-content:flex-start">
       ${hasQ ? `<button class="ghost" onclick='showCustomerHistory(${JSON.stringify(c.chatId)})'>📋 سجل الأسئلة</button>` : ""}
