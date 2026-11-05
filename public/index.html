@@ -1229,19 +1229,13 @@ function showCustomerHistory(chatId) {
   const customerName = items.find((x) => x.customerName)?.customerName || "غير معروف";
   const body = items.map((x, i) => `
     <div class="card" style="margin:8px 0;padding:12px">
-      <div class="row" style="margin-bottom:6px"><b>السؤال ${items.length - i}</b><span class="${x.status === "answered" ? "status ok" : "status warn"}">${x.status === "answered" ? "✅ تم الإرسال" : "⏳ لم تتم الإجابة"}</span></div>
-      <div style="white-space:pre-wrap">${esc(x.q)}</div>
-      <div class="muted" style="margin-top:5px">${fmtTime(x.t)}</div>
-      ${answerEntries(x).map((a, ai) => `<div style="margin-top:8px;padding:8px;background:var(--soft);border-radius:8px;white-space:pre-wrap"><b>الإجابة ${ai + 1}:</b>\n${esc(a.text || "")}<br><span class="muted">${fmtTime(a.t)}</span><br><button class="ghost" style="margin-top:5px" onclick='editAnswerHistory(${JSON.stringify(x.id)}, ${ai})'>📝 تعديل وإعادة إرسال هذه الإجابة</button></div>`).join("")}
-      ${(x.followups || []).map((f) => {
-        const imgs = (f.attachments || []).map(a => `<br><a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" style="max-width:150px;max-height:110px;border-radius:8px;margin-top:4px;display:block"></a>`).join("");
-        return `<div style="margin-top:8px;padding:8px;border-right:3px solid var(--accent);white-space:pre-wrap"><b>متابعة العميل:</b>\n${esc(f.text)}${imgs}<br><span class="muted">${fmtTime(f.t)}</span></div>`;
-      }).join("")}
+      <div class="row" style="margin-bottom:6px"><b>المحادثة ${items.length - i}</b><span class="${x.status === "answered" ? "status ok" : "status warn"}">${x.status === "answered" ? "✅ تم الإرسال" : "⏳ لم تتم الإجابة"}</span></div>
+      ${threadHtml(x)}
     </div>`).join("");
   modal(`<h2 style="margin:0 0 10px">👤 سجل أسئلة العميل</h2>
     <div class="card" style="padding:10px;margin-bottom:8px">${custInfoHtml({ chatId, customerName })}</div>
     <p class="muted">عدد الأسئلة المسجلة لهذا العميل: ${items.length}</p>
-    <div style="max-height:60vh;overflow:auto">${body}</div>
+    <div style="max-height:62vh;overflow:auto">${body}</div>
     <div class="row" style="margin-top:14px"><button class="ghost" data-r="0">إغلاق</button></div>`);
 }
 
@@ -1516,7 +1510,7 @@ function renderQuestions() {
   const counts = {};
   questionsCache.filter((x) => x.status !== "answered").forEach((x) => { const k = normQ(x.q); counts[k] = (counts[k] || 0) + 1; });
   const byFilter = (x) => !qFilter || (qFilter === "open" ? (x.status || "open") === "open" : x.status === qFilter);
-  const rows = questionsCache.filter((x) => !["answered", "archived"].includes(x.status) && byFilter(x) && (!q || x.q.includes(q) || custSearchMatch(x, q)));
+  const rows = questionsCache.filter((x) => !["answered", "archived"].includes(x.status) && byFilter(x) && (!q || x.q.includes(q) || (x.followups || []).some((f) => (f.text || "").includes(q)) || custSearchMatch(x, q)));
   filterChip("qFilterChip", qFilter === "open" ? "فلتر: الأسئلة الجديدة" : qFilter === "followup_pending" ? "فلتر: تحتاج متابعة" : "", "clearQFilter");
   if (!rows.length) { t.innerHTML = '<tr><td class="muted">' + (qFilter || q ? "مفيش أسئلة مطابقة للفلتر الحالي" : "مفيش أسئلة بعد") + '</td></tr>'; return; }
   const qSig = JSON.stringify([q, qFilter]);
@@ -1525,9 +1519,9 @@ function renderQuestions() {
   t.innerHTML = `<tr><th>العميل</th><th>السؤال</th><th>عدد مرات</th><th>الوقت</th><th>الإجابة</th><th></th></tr>` + qShown.map((x) => `
     <tr>
       <td style="min-width:190px">${custInfoHtml(x)}</td>
-      <td style="white-space:pre-wrap">${esc(x.q)}${(x.attachments||[]).map(a => `<br><a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" style="max-width:120px;max-height:90px;border-radius:8px;margin-top:4px;display:block"></a>`).join("")}</td>
+      ${qCellHtml(x)}
       <td>${counts[normQ(x.q)] > 1 ? `<span class="chip">${counts[normQ(x.q)]}</span>` : "1"}</td>
-      <td>${fmtTime(x.t)}</td>
+      <td>${fmtTime(pendingFollowup(x)?.t || x.t)}</td>
       <td style="min-width:280px">
         ${["answered", "awaiting_followup"].includes(x.status) ? `<div class="status ok">✅ تم الرد — في انتظار متابعة العميل<br><span class="muted">المتابعات: ${x.followups?.length || 0}/${fuLimit(x.chatId)}<br>${x.followupUntil ? `المهلة حتى: ${fmtTime(x.followupUntil)}` : ""}</span><br><button class="ghost" style="margin-top:6px" onclick='toggleAnswer(${JSON.stringify(x.id)})'>📝 عرض/تعديل الإجابة</button><button class="ghost" style="margin-top:6px" onclick='sendAnswer(${JSON.stringify(x.id)}, ${JSON.stringify(x.answer || "")})'>↩️ إعادة إرسال</button><div id="answer-edit-${esc(x.id)}" class="hidden" style="margin-top:8px"><textarea id="answer-${esc(x.id)}" rows="4">${esc(x.answer || "")}</textarea><div class="answer-toolbar"><label class="file-label" onclick="event.stopPropagation()"><span id="answer-img-name-${esc(x.id)}">📎 إرفاق صورة</span><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" onchange="this.closest('.file-label').querySelector('span').textContent=this.files[0]?.name||'📎 إرفاق صورة'"></label><button class="ok" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div></div></div>` : x.status === "followup_pending" ? `<div class="status warn">📩 متابعة جديدة بانتظار الرد<br><button class="ghost" style="margin-top:6px" onclick='showFollowup(${JSON.stringify(x.id)})'>📩 عرض متابعة العميل</button><textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الرد على المتابعة..."></textarea><div class="answer-toolbar"><label class="file-label" onclick="event.stopPropagation()"><span id="answer-img-name-${esc(x.id)}">📎 إرفاق صورة</span><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" onchange="this.closest('.file-label').querySelector('span').textContent=this.files[0]?.name||'📎 إرفاق صورة'"></label><button class="ok" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div>` : x.chatId ? `<textarea id="answer-${esc(x.id)}" rows="3" placeholder="اكتب الإجابة للعميل..."></textarea><div class="answer-toolbar"><label class="file-label" onclick="event.stopPropagation()"><span id="answer-img-name-${esc(x.id)}">📎 إرفاق صورة</span><input type="file" id="answer-img-${esc(x.id)}" accept="image/*" onchange="this.closest('.file-label').querySelector('span').textContent=this.files[0]?.name||'📎 إرفاق صورة'"></label><button class="ok" onclick='sendAnswer(${JSON.stringify(x.id)})'>📤 إرسال</button></div>` : `<span class="muted">سؤال قديم بدون بيانات العميل</span>`}
       </td>
@@ -1577,13 +1571,13 @@ function toggleAnswer(id) {
 
 function showFollowup(id) {
   const item = questionsCache.find((x) => x.id === id);
-  const followup = item?.followups?.at(-1);
-  if (!followup) return;
-  const imgs = (followup.attachments || []).map(a => `<br><a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" style="max-width:180px;max-height:140px;border-radius:8px;margin-top:6px;display:block"></a>`).join("");
+  if (!item?.followups?.length) return;
   modal(`<h2 style="margin:0 0 10px">📩 متابعة العميل</h2>
     <div class="card" style="padding:10px;margin-bottom:8px">${custInfoHtml(item)}</div>
-    <div class="card" style="white-space:pre-wrap;padding:12px">${esc(followup.text)}${imgs}<br><span class="muted">${fmtTime(followup.t)}</span></div>
+    <div style="max-height:62vh;overflow:auto">${threadHtml(item, { highlightLast: true })}</div>
     <div class="row" style="margin-top:12px"><button class="ghost" data-r="0">إغلاق</button></div>`);
+  const hl = [...document.querySelectorAll(".tl-hl")].at(-1);   // ننزل عند آخر متابعة جديدة
+  if (hl && hl.scrollIntoView) hl.scrollIntoView({ block: "nearest" });
 }
 
 function archiveRows() {
@@ -1608,15 +1602,41 @@ function shortText(text, max = 90) {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
+// ---------- المحادثة بترتيب زمني: سؤال ← إجابته ← متابعة ← إجابتها ... ----------
+function threadEvents(item) {
+  const ev = [{ kind: "q", t: item.t || 0, text: item.q, attachments: item.attachments || [], ord: 0 }];
+  answerEntries(item).forEach((a, i) => ev.push({ kind: "a", t: a.t || 0, text: a.text || "", idx: i, ord: 1 }));
+  (item.followups || []).forEach((f, i) => ev.push({ kind: "f", t: f.t || 0, text: f.text || "", attachments: f.attachments || [], n: i + 1, ord: 2 }));
+  return ev.map((e, seq) => ({ ...e, seq })).sort((a, b) => a.t - b.t || a.ord - b.ord || a.seq - b.seq);
+}
+function imgsHtml(list, w = 180, h = 140) {
+  return (list || []).map((a) => `<br><a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" style="max-width:${w}px;max-height:${h}px;border-radius:8px;margin-top:6px;display:block"></a>`).join("");
+}
+function threadHtml(item, { highlightLast = false } = {}) {
+  const evs = threadEvents(item);
+  const lastF = highlightLast ? evs.filter((e) => e.kind === "f").at(-1) : null;
+  return evs.map((e) => {
+    const time = `<br><span class="muted">${esc(fmtTime(e.t))}</span>`;
+    if (e.kind === "q") return `<div class="card tl tl-q" style="margin:7px 0;padding:9px;border-right:3px solid #98a2b3"><b>❓ السؤال</b><br><span style="white-space:pre-wrap">${esc(e.text || "")}</span>${imgsHtml(e.attachments)}${time}</div>`;
+    if (e.kind === "a") return `<div class="card tl tl-a" style="margin:7px 0;padding:9px;background:var(--soft)"><b>✅ الإجابة ${e.idx + 1}</b><br><span style="white-space:pre-wrap">${esc(e.text)}</span>${time}<br><button class="ghost" style="margin-top:4px" onclick='editAnswerHistory(${JSON.stringify(item.id)}, ${e.idx})'>📝 تعديل</button></div>`;
+    const hl = lastF && e === lastF;
+    return `<div class="card tl tl-f${hl ? " tl-hl" : ""}" style="margin:7px 0;padding:9px;border-right:3px solid var(--accent)${hl ? ";background:#fffaeb" : ""}"><b>📩 متابعة ${e.n}</b>${hl ? ' <span class="status warn">جديدة بانتظار الرد</span>' : ""}<br><span style="white-space:pre-wrap">${esc(e.text)}</span>${imgsHtml(e.attachments)}${time}</div>`;
+  }).join("");
+}
+// متابعة جديدة بانتظار الرد: الإجابة الأصلية اتبعتت خلاص، فالصف في الجدول يعرض المتابعة نفسها
+function pendingFollowup(x) { return x.status === "followup_pending" && (x.followups || []).length ? x.followups.at(-1) : null; }
+function qCellHtml(x) {
+  const f = pendingFollowup(x);
+  if (f) {
+    return `<td style="white-space:pre-wrap"><span class="status warn" style="display:inline-block;margin-bottom:4px">📩 متابعة رقم ${x.followups.length}</span><br>${esc(f.text || "")}${imgsHtml(f.attachments, 120, 90)}<div class="muted" style="font-size:12px;margin-top:6px;cursor:pointer;white-space:normal" title="اضغط لعرض المحادثة كاملة" onclick='showConversation(${JSON.stringify(x.id)})'>↪ على سؤال: ${esc(shortText(x.q, 45))}</div></td>`;
+  }
+  return `<td style="white-space:pre-wrap">${esc(x.q)}${imgsHtml(x.attachments, 120, 90)}</td>`;
+}
+
 function showConversation(id) {
   const item = questionsCache.find((x) => x.id === id);
   if (!item) return;
-  const answers = answerEntries(item).map((a, i) => `<div class="card" style="margin:7px 0;padding:9px"><b>الإجابة ${i + 1}</b><br><span style="white-space:pre-wrap">${esc(a.text || "")}</span><br><span class="muted">${fmtTime(a.t)}</span><br><button class="ghost" style="margin-top:4px" onclick='editAnswerHistory(${JSON.stringify(id)}, ${i})'>📝 تعديل</button></div>`).join("");
-  const followups = (item.followups || []).map((f, i) => {
-    const imgs = (f.attachments || []).map(a => `<br><a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" style="max-width:180px;max-height:140px;border-radius:8px;margin-top:6px;display:block"></a>`).join("");
-    return `<div class="card" style="margin:7px 0;padding:9px;border-right:3px solid var(--accent)"><b>متابعة ${i + 1}</b><br><span style="white-space:pre-wrap">${esc(f.text || "")}</span>${imgs}<br><span class="muted">${fmtTime(f.t)}</span></div>`;
-  }).join("");
-  modal(`<h2 style="margin:0 0 8px">🗂️ محادثة السؤال</h2><div class="card" style="padding:10px;margin-bottom:8px">${custInfoHtml(item)}</div><div class="muted" style="white-space:pre-wrap">${esc(item.q)}</div><div style="max-height:60vh;overflow:auto;margin-top:8px">${answers}${followups}</div><div class="row" style="margin-top:10px"><button class="ghost" data-r="0">إغلاق</button></div>`);
+  modal(`<h2 style="margin:0 0 8px">🗂️ محادثة السؤال</h2><div class="card" style="padding:10px;margin-bottom:8px">${custInfoHtml(item)}</div><div style="max-height:62vh;overflow:auto;margin-top:8px">${threadHtml(item)}</div><div class="row" style="margin-top:10px"><button class="ghost" data-r="0">إغلاق</button></div>`);
 }
 
 function renderArchive() {
