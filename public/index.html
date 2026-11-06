@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html dir="rtl" lang="ar">
+<html dir="rtl" lang="ar" data-skin="v2">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -141,6 +141,94 @@
   .q-archive-table th, .q-archive-table td { padding:7px 6px; }
 
   @media (max-width:600px) { .tab { padding:8px 10px; font-size:14px; } header h1 { font-size:16px; } .toolbar input { max-width:100%; } }
+</style>
+<style id="skin-v2">
+/* شكل v2: ألوان وحركة فقط. لإرجاع الشكل القديم احذف data-skin="v2" من وسم <html> */
+:root[data-skin="v2"]{
+  --bg:#f2f5fb; --card:#fff; --line:#e5eaf4; --text:#14213d; --muted:#667394;
+  --brand:#2d5bdb; --brand-2:#4f46d8; --btn:#2f5fe0; --soft:#e9efff; --hover:#f7f9fe; --accent:#2d5bdb;
+  --radius:16px; --shadow:0 1px 2px rgba(20,33,61,.05),0 8px 24px rgba(20,33,61,.06);
+  --h1:#2f5fe3; --h2:#5648d8;
+  --c1:#2d5bdb; --c1s:#e8eeff; --c2:#0b7f4b; --c2s:#e1f7ec; --c3:#b45309; --c3s:#fff1d9; --c4:#6d3ad9; --c4s:#efe9ff;
+}
+:root[data-skin="v2"][data-theme="dark"]{
+  --bg:#0b1020; --card:#121a2e; --line:#212c47; --text:#e8edf9; --muted:#8d9ab8;
+  --brand:#6a93ff; --brand-2:#8f7bff; --btn:#3d68e6; --soft:#1a2748; --hover:#16203a; --accent:#6a93ff;
+  --shadow:0 0 0 1px rgba(106,147,255,.04),0 10px 30px rgba(0,0,0,.35);
+  --h1:#1b2d66; --h2:#2c2877;
+  --c1:#6a93ff; --c1s:#18264a; --c2:#34d399; --c2s:#10302a; --c3:#fbbf24; --c3s:#3a2d0f; --c4:#a78bfa; --c4s:#261f47;
+}
+[data-skin="v2"] *{ scrollbar-width:thin; }
+[data-skin="v2"] .ico{ width:1.15em; height:1.15em; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; vertical-align:-.2em; flex:none; }
+
+/* الهيدر */
+[data-skin="v2"] header{ background:linear-gradient(120deg,var(--h1),var(--h2)); position:relative; overflow:hidden; }
+[data-skin="v2"] header::after{ content:""; position:absolute; left:-70px; bottom:-90px; width:220px; height:220px; border-radius:50%; background:rgba(255,255,255,.07); pointer-events:none; }
+[data-skin="v2"] header > *{ position:relative; z-index:1; }
+[data-skin="v2"] header h1{ color:#fff !important; font-weight:600; letter-spacing:.2px; display:flex; align-items:center; gap:10px; text-shadow:0 1px 2px rgba(0,0,0,.18); }
+[data-skin="v2"] header h1 .ico{ width:1.3em; height:1.3em; }
+[data-skin="v2"] header .sub{ color:rgba(255,255,255,.9); opacity:1; }
+[data-skin="v2"] header button.ghost{ background:rgba(255,255,255,.14); color:#fff !important; border:1px solid rgba(255,255,255,.3); box-shadow:none; display:inline-flex; align-items:center; gap:6px; }
+[data-skin="v2"] header button.ghost:hover{ background:rgba(255,255,255,.26); border-color:rgba(255,255,255,.5); color:#fff; }
+[data-skin="v2"] #bellCount{ font-size:0; }
+[data-skin="v2"] #bellCount[data-n]:not([data-n=""])::after{ content:attr(data-n); font-size:12px; font-weight:700; background:var(--bad); color:#fff; padding:1px 7px; border-radius:99px; display:inline-block; line-height:1.5; }
+[data-skin="v2"] .bell-ring{ animation:v2ring 1s ease 3; transform-origin:50% 20%; }
+@keyframes v2ring{ 0%,100%{transform:none} 20%{transform:rotate(-12deg)} 40%{transform:rotate(10deg)} 60%{transform:rotate(-6deg)} 80%{transform:rotate(3deg)} }
+
+/* التابات (مع مؤشر متحرك) */
+[data-skin="v2"] .tabs{ position:relative; border-radius:14px; padding:5px; gap:2px; box-shadow:var(--shadow); }
+[data-skin="v2"] .tab{ position:relative; z-index:1; display:inline-flex; align-items:center; gap:7px; border-radius:10px; transition:color .25s; }
+[data-skin="v2"] .tab:hover{ color:var(--text); }
+[data-skin="v2"] .tab.active{ color:var(--brand); box-shadow:inset 0 -2px 0 var(--brand); }
+[data-skin="v2"] .tabs:not(.has-ind) .tab.active{ background:var(--soft); }
+[data-skin="v2"] .tabs.has-ind .tab.active{ background:transparent; }
+[data-skin="v2"] .tab-ind{ position:absolute; z-index:0; top:5px; bottom:5px; left:0; border-radius:10px; background:var(--soft); transition:transform .35s cubic-bezier(.3,.8,.3,1),width .35s; pointer-events:none; }
+
+/* الكروت والأرقام */
+[data-skin="v2"] .card{ border-radius:16px; }
+[data-skin="v2"] .kpi{ border-radius:16px; padding:16px; transition:transform .2s,box-shadow .2s,border-color .2s; }
+[data-skin="v2"] .kpi .ic{ width:36px; height:36px; border-radius:11px; display:grid; place-items:center; margin-bottom:10px; background:var(--c1s); color:var(--c1); font-size:18px; }
+[data-skin="v2"] .kpi .ic.c2{ background:var(--c2s); color:var(--c2); }
+[data-skin="v2"] .kpi .ic.c3{ background:var(--c3s); color:var(--c3); }
+[data-skin="v2"] .kpi .ic.c4{ background:var(--c4s); color:var(--c4); }
+[data-skin="v2"] .kpi .n{ font-size:28px; font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:-.5px; }
+[data-skin="v2"] .kpi.click:hover{ transform:translateY(-3px); box-shadow:0 14px 32px rgba(53,102,232,.16); border-color:var(--brand); }
+[data-skin="v2"] h2.sect{ display:flex; align-items:center; gap:8px; }
+[data-skin="v2"] h2.sect .ico{ color:var(--brand); }
+[data-skin="v2"] .skel{ min-height:118px; position:relative; overflow:hidden; }
+[data-skin="v2"] .skel::after{ content:""; position:absolute; inset:0; background:linear-gradient(100deg,transparent 20%,rgba(120,140,190,.14) 50%,transparent 80%); transform:translateX(100%); animation:v2shim 1.2s infinite; }
+@keyframes v2shim{ to{ transform:translateX(-100%); } }
+
+/* الأزرار والحقول والجداول */
+[data-skin="v2"] button{ background:var(--btn); border-radius:11px; font-weight:500; box-shadow:0 1px 2px rgba(53,102,232,.28); transition:transform .12s,box-shadow .2s,background .2s,border-color .2s,color .2s; }
+[data-skin="v2"] button:hover{ opacity:1; filter:brightness(1.07); box-shadow:0 4px 12px rgba(53,102,232,.25); }
+[data-skin="v2"] button.ghost, [data-skin="v2"] button.danger, [data-skin="v2"] button.icon{ box-shadow:none; filter:none; }
+[data-skin="v2"] button.ghost:hover, [data-skin="v2"] button.icon:hover{ border-color:var(--brand); color:var(--brand); }
+[data-skin="v2"] button.danger:hover{ border-color:var(--bad); background:color-mix(in srgb,var(--bad) 8%,var(--card)); }
+[data-skin="v2"] button.ok{ background:#0a8450; box-shadow:0 1px 2px rgba(10,132,80,.3); }
+[data-skin="v2"] button .ico{ margin-inline-end:2px; }
+[data-skin="v2"] input:focus, [data-skin="v2"] textarea:focus{ outline:none; border-color:var(--brand); box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent); }
+[data-skin="v2"] th{ font-size:13px; letter-spacing:.2px; }
+[data-skin="v2"] tr:hover > td{ background:var(--hover); }
+
+/* الحركة (transform / opacity فقط، ومفيش حركة على صفوف الجداول) */
+@keyframes v2up{ from{ opacity:0; transform:translateY(10px); } }
+@keyframes v2fade{ from{ opacity:0; } }
+@keyframes v2pop{ from{ opacity:0; transform:translateY(10px) scale(.97); } }
+@keyframes v2fill{ from{ transform:scaleX(0); } }
+[data-skin="v2"] .kpis .kpi{ animation:v2up .45s cubic-bezier(.2,.8,.2,1) backwards; }
+[data-skin="v2"] .kpis .kpi:nth-child(2){ animation-delay:.05s; } [data-skin="v2"] .kpis .kpi:nth-child(3){ animation-delay:.1s; }
+[data-skin="v2"] .kpis .kpi:nth-child(4){ animation-delay:.15s; } [data-skin="v2"] .kpis .kpi:nth-child(n+5){ animation-delay:.2s; }
+[data-skin="v2"] .v2-enter > *{ animation:v2up .4s cubic-bezier(.2,.8,.2,1) backwards; }
+[data-skin="v2"] .v2-enter > *:nth-child(2){ animation-delay:.05s; } [data-skin="v2"] .v2-enter > *:nth-child(3){ animation-delay:.1s; }
+[data-skin="v2"] .v2-enter > *:nth-child(n+4){ animation-delay:.15s; }
+[data-skin="v2"] .modal-bg{ animation:v2fade .18s ease; }
+[data-skin="v2"] .modal{ border-radius:18px; animation:v2pop .24s cubic-bezier(.2,.9,.3,1.1); }
+[data-skin="v2"] .bar-fill{ transform-origin:right center; animation:v2fill .9s cubic-bezier(.2,.8,.2,1) .25s backwards; }
+[data-skin="v2"] .no-anim .bar-fill{ animation:none; }
+@media (prefers-reduced-motion:reduce){
+  [data-skin="v2"] *, [data-skin="v2"] *::before, [data-skin="v2"] *::after{ animation:none !important; transition:none !important; }
+}
 </style>
 </head>
 <body>
@@ -358,10 +446,40 @@ function setStatus(text, cls = "") {
 }
 
 // ---------- الوضع الداكن ----------
+// ---------- أيقونات بسيطة (SVG) بدل الإيموجي في الواجهة الرئيسية ----------
+const V2 = document.documentElement.dataset.skin === "v2";
+const ICONS = {
+  stats: '<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',
+  menu: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
+  questions: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+  archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10h14V9M10 13h4"/>',
+  presslog: '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+  history: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  bans: '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/>',
+  moon: '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6 19 19M5 19l1.4-1.4M17.6 6.4 19 5"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.4 3.2-5 6.5-5s5.9 1.6 6.5 5"/><path d="M16 5a3.2 3.2 0 0 1 0 6M18 15c2 .6 3.2 2.1 3.5 5"/>',
+  newuser: '<circle cx="10" cy="8" r="3.5"/><path d="M3.5 20c.6-3.4 3.2-5 6.5-5s5.9 1.6 6.5 5M19 8v6M16 11h6"/>',
+  activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  cursor: '<path d="m5 3 14 7-6 2-2 6z"/>',
+  phone: '<rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/>',
+  percent: '<path d="M19 5 5 19"/><circle cx="7" cy="7" r="2.2"/><circle cx="17" cy="17" r="2.2"/>',
+  clipboard: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/>',
+  inbox: '<path d="M3 13h5l1 3h6l1-3h5"/><path d="M5 13 7 5h10l2 8v6H5z"/>',
+  pulse: '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
+  download: '<path d="M12 4v11M7 11l5 5 5-5M4 20h16"/>',
+  doc: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14-4L4 9M4 4v5h5M4 13a8 8 0 0 0 14 4l2-2M20 20v-5h-5"/>',
+  ban: '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+};
+function ico(name) { return `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`; }
+
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   localStorage.setItem("legan-theme", t);
-  $("themeBtn").textContent = t === "dark" ? "☀️" : "🌙";
+  $("themeBtn").innerHTML = V2 ? ico(t === "dark" ? "sun" : "moon") : (t === "dark" ? "☀️" : "🌙");
 }
 function toggleTheme() {
   applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
@@ -452,6 +570,7 @@ function showTab(name) {
   if (name === "presslog") loadPressLog();
   if (name === "history") loadHistory();
   if (name === "bans") loadBans();
+  afterTabShow(name);
 }
 
 // ---------- الشجرة: مسارات وأسماء ----------
@@ -1383,6 +1502,7 @@ function updateBell() {
   btn.classList.toggle("hidden", !creds);
   $("bellCount").textContent = n ? `(${n})` : "";
   btn.style.color = n ? "var(--bad)" : "";
+  v2Bell(n);
 }
 function openQuestionsFromBell() { showTab("questions"); }
 
@@ -1910,7 +2030,7 @@ function closedCardHtml(timeout, manual, maxf) {
   const p = percents([timeout, manual, maxf]);
   const row = (kind, label, n, pc, color) => `<div class="click" style="cursor:pointer" onclick="goArchive('closed:${kind}')" title="عرض هذه الأسئلة في الأرشيف">
       <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px"><span>${label}</span><span><b>${n}</b> · ${pc}%</span></div>
-      <div style="height:8px;background:var(--soft);border-radius:4px"><div style="width:${pc}%;height:8px;background:${color};border-radius:4px"></div></div></div>`;
+      <div style="height:8px;background:var(--soft);border-radius:4px"><div class="bar-fill" style="width:${pc}%;height:8px;background:${color};border-radius:4px"></div></div></div>`;
   return `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
       <h3 style="margin:0;font-size:15px">🔒 الأسئلة المغلقة: ليه اتقفلت؟</h3>
       <span class="muted">الإجمالي <b id="qs-closed">${total}</b></span></div>
@@ -1926,7 +2046,7 @@ function updateQuestionCards() {   // بيحدّث الأرقام فوراً ب�
   const c = calcQStats(questionsCache);
   const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
   set("qs-total", c.total); set("qs-open", c.open); set("qs-fu", c.fu); set("qs-archive", c.closed + c.legacy);
-  const cc = $("qs-closedcard"); if (cc) cc.innerHTML = closedCardHtml(c.ct, c.cm, c.cx);
+  const cc = $("qs-closedcard"); if (cc) { cc.innerHTML = closedCardHtml(c.ct, c.cm, c.cx); cc.classList.add("no-anim"); }
   set("qs-wait", `منهم ${c.wait} في انتظار رد العميل`);
 }
 function statsSectionsHtml(st) {
@@ -2045,9 +2165,10 @@ async function openAllQuestions() {
   input.addEventListener("input", draw); draw();
 }
 
-async function loadStats() {
+async function loadStats() { await loadStatsCore(); v2AfterStats(); }
+async function loadStatsCore() {
   const box = $("stats-body");
-  box.innerHTML = '<div class="muted">جاري التحميل...</div>';
+  box.innerHTML = V2 ? skeletonHtml() : '<div class="muted">جاري التحميل...</div>';
   try {
     const st = await api("stats");
     lastStats = st;
@@ -2267,6 +2388,115 @@ async function restoreVersion(sha) {
     toast("اتحمّلت النسخة في المحرر، اضغط حفظ لتثبيتها", "ok");
   } catch (e) { toast(e.message, "bad"); }
 }
+
+// ================= شكل v2: أيقونات وحركة (شكل فقط، من غير أي منطق) =================
+const reduceMotion = () => !window.matchMedia || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const EMOJI_RE = /^\s*((?:\p{Extended_Pictographic}\uFE0F?)+)\s*/u;
+const EMOJI_ICON = { "👥": "users", "🆕": "newuser", "🟢": "activity", "👆": "cursor", "🕒": "clock", "📱": "phone", "🚫": "ban", "📊": "percent", "📚": "inbox", "🔔": "bell", "🗄": "archive" };
+const KPI_TINT = { users: "c1", newuser: "c2", activity: "c2", cursor: "c3", clock: "c4", phone: "c2", ban: "c3", percent: "c4", inbox: "c1", bell: "c3", archive: "c4" };
+const TAB_ICON = { stats: "stats", menu: "menu", questions: "questions", archive: "archive", presslog: "presslog", history: "history", bans: "bans" };
+
+// بيشيل الإيموجي اللي في أول النص (لو موجود) وبيرجّع مفتاحه
+function stripEmoji(el) {
+  const node = [...el.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+  if (!node) return null;
+  const m = node.textContent.match(EMOJI_RE);
+  if (!m) return null;
+  node.textContent = node.textContent.replace(EMOJI_RE, "");
+  return m[1].replace(/\uFE0F/g, "");
+}
+function iconize(el, map) {
+  if (!el || el.querySelector(":scope > .ico")) return;
+  const probe = [...el.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+  const m = probe && probe.textContent.match(EMOJI_RE);
+  if (!m || !map[m[1].replace(/\uFE0F/g, "")]) return;
+  const name = map[stripEmoji(el)];
+  el.insertAdjacentHTML("afterbegin", ico(name));
+}
+function decorateStatic() {
+  if (!V2) return;
+  document.querySelectorAll(".tab").forEach((b) => { if (!b.querySelector(".ico")) { stripEmoji(b); b.insertAdjacentHTML("afterbegin", ico(TAB_ICON[b.dataset.tab] || "stats")); } });
+  iconize(document.querySelector("header h1"), { "🩺": "pulse" });
+  iconize($("bellBtn"), { "🔔": "bell" });
+  document.querySelectorAll("#tab-stats > .row button").forEach((b) => iconize(b, { "🔄": "refresh", "📥": "download", "📄": "doc" }));
+}
+function decorateKpis(root) {
+  if (!V2) return;
+  root.querySelectorAll("h2.sect").forEach((h) => iconize(h, { "👥": "users", "📋": "clipboard" }));
+  root.querySelectorAll(".kpi").forEach((k) => {
+    if (k.querySelector(".ic")) return;
+    const l = k.querySelector(".l");
+    if (!l) return;
+    const key = stripEmoji(l);
+    const name = key && EMOJI_ICON[key];
+    if (name) k.insertAdjacentHTML("afterbegin", `<div class="ic ${KPI_TINT[name] || "c1"}">${ico(name)}</div>`);
+  });
+}
+const skeletonHtml = () => `<div class="kpis">${'<div class="kpi skel"></div>'.repeat(5)}</div>`;
+
+// الأرقام بتعدّ من 0 للقيمة (بتتوقف لو الرقم اتغيّر من برا، وبتتلغي مع "تقليل الحركة")
+function animateCounts(root) {
+  if (!V2 || reduceMotion()) return;
+  root.querySelectorAll(".kpi .n").forEach((el) => {
+    const txt = el.textContent.trim(), m = txt.match(/^(\d+(?:\.\d+)?)(%?)$/);
+    if (!m) return;
+    const to = parseFloat(m[1]), dec = m[1].includes(".") ? 1 : 0, suf = m[2], t0 = performance.now();
+    let last = "0" + suf;
+    el.textContent = last;
+    const step = (now) => {
+      if (el.textContent !== last) return;
+      const p = Math.min(1, (now - t0) / 700), e = 1 - Math.pow(1 - p, 3);
+      last = p === 1 ? txt : (to * e).toFixed(dec) + suf;
+      el.textContent = last;
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+}
+function v2AfterStats() {
+  const box = $("stats-body");
+  if (!box || !V2) return;
+  decorateKpis(box);
+  animateCounts(box);
+}
+
+// مؤشر التاب المتحرك
+function moveTabIndicator() {
+  if (!V2) return;
+  const nav = document.querySelector(".tabs");
+  if (!nav) return;
+  const a = nav.querySelector(".tab.active");
+  if (!a || !a.offsetWidth) return;
+  let ind = nav.querySelector(".tab-ind");
+  if (!ind) { ind = document.createElement("span"); ind.className = "tab-ind"; nav.prepend(ind); }
+  ind.style.width = a.offsetWidth + "px";
+  ind.style.transform = `translateX(${a.offsetLeft}px)`;
+  nav.classList.add("has-ind");
+}
+function afterTabShow(name) {
+  moveTabIndicator();
+  const el = $("tab-" + name);
+  if (!V2 || !el || name === "stats" || reduceMotion()) return;
+  el.classList.remove("v2-enter"); void el.offsetWidth; el.classList.add("v2-enter");
+  clearTimeout(el._enterT);
+  el._enterT = setTimeout(() => el.classList.remove("v2-enter"), 700);
+}
+// الجرس: عدد على شكل شارة، وهزّة لما يوصل سؤال أو متابعة جديدة
+let _bellLast = null;
+function v2Bell(n) {
+  const c = $("bellCount");
+  if (c) c.dataset.n = n ? String(n) : "";
+  const b = $("bellBtn");
+  if (V2 && b && _bellLast !== null && n > _bellLast && !reduceMotion()) { b.classList.remove("bell-ring"); void b.offsetWidth; b.classList.add("bell-ring"); }
+  _bellLast = n;
+}
+decorateStatic();
+if (V2) {
+  const nav = document.querySelector(".tabs");
+  if (nav && window.ResizeObserver) new ResizeObserver(moveTabIndicator).observe(nav);
+  window.addEventListener("resize", moveTabIndicator);
+}
+
 autoLogin();
 </script>
 </body>
