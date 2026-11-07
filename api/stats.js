@@ -10,14 +10,27 @@ export function dayKey(offset = 0) {
 }
 export const todayKey = () => dayKey(0);
 
+// آخر خطأ رجّعته قاعدة البيانات (علشان رسالة الخطأ في اللوحة تقدر تقول السبب). السلوك نفسه: الفشل بيرجّع null زي الأول.
+let lastRedisError = null;
+export const getLastRedisError = () => lastRedisError;
+let lastRedisLogAt = 0;
+function noteRedisError(msg) {
+  const clean = String(msg).replace(/bot\d+:[A-Za-z0-9_-]+/g, "bot***").slice(0, 200);
+  lastRedisError = { t: Date.now(), msg: clean };
+  if (Date.now() - lastRedisLogAt > 20000) { lastRedisLogAt = Date.now(); console.error("[redis]", clean); }   // مرة كل 20 ثانية بالكتير
+}
 export async function redis(cmd) {
   if (!URL_R || !TOKEN_R) return null;
-  const r = await fetch(URL_R, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${TOKEN_R}`, "Content-Type": "application/json" },
-    body: JSON.stringify(cmd),
-  });
+  let r;
+  try {
+    r = await fetch(URL_R, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TOKEN_R}`, "Content-Type": "application/json" },
+      body: JSON.stringify(cmd),
+    });
+  } catch (e) { noteRedisError("تعذّر الاتصال بـ Redis: " + (e?.message || e)); throw e; }
   const j = await r.json();
+  if (j && j.error) noteRedisError(j.error);   // مثلاً: تجاوز حد Upstash أو توكن غلط (بيرجّع null زي الأول)
   return j.result ?? null;
 }
 

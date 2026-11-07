@@ -4,6 +4,7 @@ import { timingSafeEqual, createHash } from "crypto";
 import { getStats, getStatsByDay, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched, banUser, unbanUser, getBans, getBanInfo, redis,
   getIntake, setIntake, computeQuestionStats, DEFAULT_INTAKE_MESSAGE, MAX_FOLLOWUPS, MAX_EXTRA_PER_OPERATION, getExtraFollowups, getAllExtras, limitForItem, followupLimitState, adjustQuestionExtra, clearPermanentExtra, claimOperation, logLimitChange, getLimitLog } from "./stats.js";
 import { phoneFeatureEnabled, phoneSharedCount, customerMap, listCustomers, customerDetail } from "./customers.js";
+import { explainError } from "./errors.js";
 
 const {
   ADMIN_USER, ADMIN_PASS,          // الأدمن: يعدّل ويحذف
@@ -56,8 +57,15 @@ function validate(node, isRoot = true, depth = 0) {
   return null;
 }
 
+// خطأ من خدمة خارجية (تيليجرام / GitHub / ImgBB) بسببه الحقيقي، علشان اللوحة تشرحه
+function extError(source, message, extra = {}) { return Object.assign(new Error(message), { source }, extra); }
+async function ghFetch(url, opts) {
+  try { return await fetch(url, opts); } catch (e) { throw extError("github", e?.message || "network", { network: true }); }
+}
 async function readCurrent(ref = GITHUB_BRANCH) {
-  const j = await (await fetch(`${API}?ref=${ref}`, { headers: GH_HEADERS })).json();
+  const r = await ghFetch(`${API}?ref=${ref}`, { headers: GH_HEADERS });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.content) throw extError("github", j.message || `HTTP ${r.status}`, { status: r.status });
   return { sha: j.sha, content: JSON.parse(Buffer.from(j.content, "base64").toString("utf8")) };
 }
 
@@ -66,21 +74,23 @@ async function sendTelegram(chatId, answer, messages = {}, finalAnswer = false, 
   const text = `📩 رد على سؤالك:\n\n${answer}${finalAnswer ? "" : (followupCount > 0 ? `\n\n📩 المتابعة: ${followupCount}/${limit}` : (messages.answerFooter || `\n\n📌 مسموح بحد أقصى ${limit} متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك».`))}`;
   const replyMarkup = finalAnswer ? {} : { reply_markup: { force_reply: true, input_field_placeholder: messages.followupPlaceholder || "اكتب متابعة السؤال هنا..." } };
   let r, j;
-  if (imageUrl) {
-    r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, photo: imageUrl, caption: text, ...replyMarkup }),
-    });
-  } else {
-    r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text, ...replyMarkup }),
-    });
-  }
+  try {
+    if (imageUrl) {
+      r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, photo: imageUrl, caption: text, ...replyMarkup }),
+      });
+    } else {
+      r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text, ...replyMarkup }),
+      });
+    }
+  } catch (e) { throw extError("telegram", e?.message || "network", { network: true }); }
   j = await r.json().catch(() => ({}));
-  if (!r.ok || !j.ok) throw new Error(j.description || "فشل إرسال الإجابة إلى تيليجرام");
+  if (!r.ok || !j.ok) throw extError("telegram", j.description || "فشل إرسال الإجابة إلى تيليجرام", { status: r.status, retryAfter: j.parameters?.retry_after });
   return j.result;
 }
 
@@ -211,9 +221,11 @@ export default async function handler(req, res) {
       const { IMGBB_API_KEY } = process.env;
       if (!IMGBB_API_KEY) return res.status(500).json({ error: "IMGBB_API_KEY غير مضبوط" });
       const form = new URLSearchParams({ key: IMGBB_API_KEY, image });
-      const r = await fetch("https://api.imgbb.com/1/upload", { method: "POST", body: form });
+      let r;
+      try { r = await fetch("https://api.imgbb.com/1/upload", { method: "POST", body: form }); }
+      catch (e) { throw extError("imgbb", e?.message || "network", { network: true }); }
       const j = await r.json().catch(() => ({}));
-      if (!j.success) return res.status(500).json({ error: j.error?.message || "فشل رفع الصورة" });
+      if (!j.success) throw extError("imgbb", j.error?.message || "فشل رفع الصورة", { status: r.status });
       return res.json({ url: j.data.url });
     }
 
@@ -339,11 +351,12 @@ export default async function handler(req, res) {
     }
 
     if (action === "history") {
-      const r = await fetch(
+      const r = await ghFetch(
         `https://api.github.com/repos/${GITHUB_REPO}/commits?path=${GITHUB_FILE}&sha=${GITHUB_BRANCH}&per_page=20`,
         { headers: GH_HEADERS }
       );
-      const list = await r.json();
+      const list = await r.json().catch(() => ({}));
+      if (!r.ok || !Array.isArray(list)) throw extError("github", list.message || `HTTP ${r.status}`, { status: r.status });
       return res.json({
         commits: list.map((c) => ({
           sha: c.sha,
@@ -399,7 +412,7 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: "المحرر مايقدرش يحذف زراير، اطلب من الأدمن" });
       }
 
-      const r = await fetch(API, {
+      const r = await ghFetch(API, {
         method: "PUT",
         headers: GH_HEADERS,
         body: JSON.stringify({
@@ -409,12 +422,15 @@ export default async function handler(req, res) {
           branch: GITHUB_BRANCH,
         }),
       });
-      if (!r.ok) return res.status(500).json({ error: "فشل الحفظ على GitHub" });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw extError("github", j.message || `HTTP ${r.status}`, { status: r.status }); }
       return res.json({ ok: true });
     }
 
     return res.status(400).json({ error: "action غلط" });
-  } catch {
-    return res.status(500).json({ error: "حصل خطأ في السيرفر" });
+  } catch (e) {
+    // بنشرح السبب للمستخدم وبنسجّله في Vercel Logs (من غير أسرار أو بيانات عملاء)
+    const info = explainError(e, action);
+    console.error("[admin]", info.log);
+    return res.status(info.status).json({ error: info.message, code: info.code });
   }
 }
