@@ -1519,6 +1519,7 @@ function moreRow(total, shown, action) {
   return `<tr><td colspan="9" style="text-align:center"><button class="ghost" onclick="${action}">⬇️ عرض ${Math.min(PAGE_SIZE, total - shown)} إضافية (معروض ${shown} من ${total})</button></td></tr>`;
 }
 function renderQuestions() {
+  updateBell(); updateQuestionCards();   // الجرس والكروت يتحدّثوا فوراً بعد أي رد/إغلاق/حذف (من غير تبديل التاب)
   const t = $("qTable");
   const q = ($("qSearch").value || "").trim();
   const counts = {};
@@ -1668,6 +1669,7 @@ function showConversation(id) {
 }
 
 function renderArchive() {
+  updateBell(); updateQuestionCards();
   const t = $("aTable");
   if (!t) return;
   const rows = archiveRows();
