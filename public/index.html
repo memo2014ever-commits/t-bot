@@ -230,6 +230,7 @@
         </div>
       </div>
       <div class="card" id="intakeCard"></div>
+      <div class="card" id="notifyCard" style="display:none"></div>
       <div class="card" id="quickCard">
         <div class="row">
           <h2 style="margin:0">⚡ الإجابات السريعة</h2>
@@ -1422,6 +1423,7 @@ async function loadQuestions() {
     updateBell();
     renderQuickList();
     if (document.activeElement?.id !== "intakeMsg") renderIntake();
+    if (role === "admin" && notifyState === null) loadNotify();
   } catch (e) { toast(e.message, "bad"); }
 }
 
@@ -1512,6 +1514,146 @@ async function saveIntakeMessage() {
     toast("تم حفظ رسالة الاعتذار", "ok");
   } catch (e) { toast(e.message, "bad"); }
   renderIntake();
+}
+
+// ---------- تنبيهات الموظفين على تيليجرام (أدمن فقط) ----------
+let notifyState = null, notifyOpen = false, notifyCode = null, notifyPollTimer = null, NOTIFY_POLL_MS = 4000;
+try { notifyOpen = sessionStorage.getItem("notify-open") === "1"; } catch {}
+const NF_TYPE = { private: "خاص", group: "جروب", supergroup: "جروب", channel: "قناة" };
+async function loadNotify() {
+  if (role !== "admin") return;
+  try { notifyState = await api("notifyGet"); } catch { return; }
+  renderNotify();
+}
+function toggleNotifyPanel() {
+  notifyOpen = !notifyOpen;
+  try { sessionStorage.setItem("notify-open", notifyOpen ? "1" : "0"); } catch {}
+  const d = $("notifyDetails"), a = $("notifyArrow");
+  if (d) d.style.display = notifyOpen ? "block" : "none";
+  if (a) a.textContent = notifyOpen ? "▴" : "▾";
+}
+function renderNotifyChats() {
+  const el = $("nf-chats");
+  if (!el || !notifyState) return;
+  const chats = notifyState.chats || [];
+  el.innerHTML = chats.length ? chats.map((c) => `<div class="card" style="padding:10px;margin:6px 0">
+      <div class="row"><div><b>${esc(c.label || "بدون اسم")}</b> <span class="chip">${esc(NF_TYPE[c.type] || c.type || "")}</span>
+        <div class="muted" style="font-size:12px">اتربطت ${esc(fmtTime(c.linkedAt))}</div></div>
+        <button class="danger" onclick='notifyUnlink(${JSON.stringify(c.chatId)})'>فصل</button></div>
+      ${c.lastError ? `<div class="status warn" style="margin-top:6px">⚠️ آخر خطأ: ${esc(c.lastError)}</div>` : ""}</div>`).join("")
+    : '<div class="muted">مفيش محادثات مربوطة لسه.</div>';
+  const st = $("nf-status");
+  if (st) st.textContent = !notifyState.config.enabled ? "⏸️ التنبيهات متوقفة" : chats.length ? `✅ التنبيهات شغّالة · ${chats.length} محادثة مربوطة` : "⚠️ مفعّلة لكن مفيش محادثة مربوطة";
+  if (st) st.className = notifyState.config.enabled && chats.length ? "status ok" : "status warn";
+}
+function renderNotify() {
+  const el = $("notifyCard");
+  if (!el) return;
+  if (role !== "admin" || !notifyState) { el.style.display = "none"; return; }
+  el.style.display = "";
+  const c = notifyState.config, last = notifyState.last;
+  el.innerHTML = `<div class="row" style="align-items:center">
+      <div><h2 style="margin:0">🔔 تنبيهات الموظفين على تيليجرام</h2><div id="nf-status" class="status" style="margin-top:6px"></div></div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <label class="sw" title="تفعيل / إيقاف"><input type="checkbox" id="nf-enabled" ${c.enabled ? "checked" : ""} onchange="notifyToggleEnabled(this.checked)"><span class="slider"></span></label>
+        <button class="ghost" id="notifyArrow" onclick="toggleNotifyPanel()" title="إظهار / إخفاء الإعدادات" style="padding:2px 10px;font-size:18px;line-height:1.4">${notifyOpen ? "▴" : "▾"}</button>
+      </div></div>
+    <div id="notifyDetails" style="display:${notifyOpen ? "block" : "none"}">
+      <p class="muted" style="margin:8px 0">بيوصلك رسالة على تيليجرام أول ما يجي سؤال جديد أو متابعة جديدة، حتى لو اللوحة مقفولة. مفيش رقم هاتف ولا ID عميل بيتبعت في التنبيه.</p>
+      <h3 style="margin:12px 0 4px;font-size:14px">المحادثات المربوطة (حتى ${notifyState.maxChats})</h3>
+      <div id="nf-chats"></div>
+      <div style="margin-top:8px"><button class="ghost" id="nf-link" onclick="notifyLink()">🔗 ربط محادثة جديدة</button></div>
+      <div id="nf-codebox"></div>
+      <h3 style="margin:16px 0 6px;font-size:14px">الإعدادات</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:8px">
+        <label><input type="checkbox" id="nf-q" ${c.onQuestion ? "checked" : ""}> سؤال جديد</label>
+        <label><input type="checkbox" id="nf-f" ${c.onFollowup ? "checked" : ""}> متابعة جديدة</label>
+        <label><input type="checkbox" id="nf-name" ${c.showName ? "checked" : ""}> إظهار اسم العميل</label>
+      </div>
+      <label class="muted">عدد حروف نص السؤال في التنبيه (من 0 إلى 300، و0 = من غير نص)</label>
+      <input id="nf-chars" type="number" min="0" max="300" step="1" value="${c.previewChars}">
+      <label class="muted" style="margin-top:8px;display:block">أقصى عدد تنبيهات في الدقيقة (من 1 إلى 30). لو زادت بتتجمّع في رسالة واحدة «وصلت أسئلة كتير»، والأسئلة نفسها بتتسجل كلها.</label>
+      <input id="nf-rate" type="number" min="1" max="30" step="1" value="${c.maxPerMinute}">
+      <label class="muted" style="margin-top:8px;display:block">رابط اللوحة (لزرار «فتح اللوحة» في التنبيه)</label>
+      <input id="nf-url" dir="ltr" placeholder="https://..." value="${esc(c.panelUrl || location.origin)}">
+      <div id="nf-err" class="status" style="color:var(--bad);margin-top:6px"></div>
+      <div class="row" style="margin-top:10px;justify-content:flex-start">
+        <button class="ok" onclick="notifySave()">💾 حفظ الإعدادات</button>
+        <button class="ghost" onclick="notifyTest()">📨 إرسال تنبيه تجريبي</button>
+      </div>
+      <div class="muted" id="nf-last" style="margin-top:8px">${last ? `آخر إرسال: ${esc(fmtTime(last.t))} · ${last.failed ? `فشل لـ ${last.failed} محادثة` : "نجح"}` : "لسه مفيش إرسال."}</div>
+    </div>`;
+  renderNotifyChats();
+  if (notifyCode && notifyCode.until > Date.now()) showNotifyCode();
+}
+async function notifyToggleEnabled(on) {
+  const box = $("nf-enabled");
+  try {
+    const r = await api("notifySet", { config: { enabled: on } });
+    notifyState.config = r.config; renderNotifyChats();
+    toast(on ? "تم تشغيل التنبيهات" : "تم إيقاف التنبيهات", "ok");
+    if (on && !(notifyState.chats || []).length) toast("اربط محادثة عشان توصلك التنبيهات", "bad");
+  } catch (e) { toast(e.message, "bad"); if (box) box.checked = !on; }
+}
+async function notifySave() {
+  const err = $("nf-err"), chars = $("nf-chars").value.trim(), rate = $("nf-rate").value.trim(), url = $("nf-url").value.trim();
+  err.textContent = "";
+  if (!/^\d+$/.test(chars) || +chars > 300) { err.textContent = "عدد الحروف رقم صحيح من 0 إلى 300"; return; }
+  if (!/^\d+$/.test(rate) || +rate < 1 || +rate > 30) { err.textContent = "أقصى عدد في الدقيقة رقم صحيح من 1 إلى 30"; return; }
+  if (url && !/^https:\/\/\S+$/.test(url)) { err.textContent = "رابط اللوحة لازم يبدأ بـ https://"; return; }
+  try {
+    const r = await api("notifySet", { config: { onQuestion: $("nf-q").checked, onFollowup: $("nf-f").checked, showName: $("nf-name").checked, previewChars: +chars, maxPerMinute: +rate, panelUrl: url } });
+    notifyState.config = r.config; renderNotifyChats();
+    toast("تم حفظ إعدادات التنبيهات", "ok");
+  } catch (e) { err.textContent = e.message; }
+}
+function showNotifyCode() {
+  const box = $("nf-codebox");
+  if (!box || !notifyCode) return;
+  const cmd = `/notify ${notifyCode.code}`;
+  box.innerHTML = `<div class="card" style="padding:12px;margin-top:8px;border:1px dashed var(--brand)">
+      <div class="muted">الكود (صالح 10 دقايق، ويتستخدم مرة واحدة):</div>
+      <div dir="ltr" style="font-size:26px;letter-spacing:5px;font-weight:700;margin:4px 0">${esc(notifyCode.code)}</div>
+      <div>ابعت للبوت${notifyCode.bot ? ` <b dir="ltr">@${esc(notifyCode.bot)}</b>` : ""} الرسالة دي:</div>
+      <div style="margin:6px 0"><code dir="ltr" style="font-size:16px">${esc(cmd)}</code> <button class="ghost" onclick='notifyCopy(${JSON.stringify(cmd)})'>نسخ</button></div>
+      <ul class="muted" style="margin:6px 18px;padding:0;line-height:1.8">
+        <li><b>التنبيه يوصلك خاص:</b> ابعت الأمر في محادثتك الخاصة مع البوت.</li>
+        <li><b>التنبيه يوصل لجروب:</b> ضيف البوت للجروب وابعت الأمر هناك.</li></ul>
+      <div class="muted" id="nf-wait">⏳ مستني الربط… (بيتحدّث لوحده)</div></div>`;
+}
+async function notifyLink() {
+  try {
+    const r = await api("notifyLinkCode");
+    notifyCode = { code: r.code, bot: r.bot, until: Date.now() + r.expiresIn * 1000, before: (notifyState.chats || []).length };
+    showNotifyCode();
+    clearInterval(notifyPollTimer);
+    notifyPollTimer = setInterval(async () => {
+      if (!notifyCode || notifyCode.until < Date.now() || !$("nf-codebox")) { clearInterval(notifyPollTimer); if ($("nf-codebox")) $("nf-codebox").innerHTML = ""; notifyCode = null; return; }
+      try {
+        const st = await api("notifyGet");
+        notifyState.chats = st.chats; renderNotifyChats();
+        if (st.chats.length > notifyCode.before) { clearInterval(notifyPollTimer); notifyCode = null; $("nf-codebox").innerHTML = ""; toast("تم ربط المحادثة ✅", "ok"); }
+      } catch {}
+    }, NOTIFY_POLL_MS);
+  } catch (e) { toast(e.message, "bad"); }
+}
+function notifyCopy(text) {
+  const done = () => toast("تم النسخ", "ok");
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => toast(text, "ok"));
+  else toast(text, "ok");
+}
+async function notifyUnlink(chatId) {
+  if (!(await confirmBox("فصل المحادثة دي من التنبيهات؟ مش هتوصلها تنبيهات تاني.", "فصل", true))) return;
+  try { await api("notifyUnlink", { ref: String(chatId) }); const st = await api("notifyGet"); notifyState.chats = st.chats; renderNotifyChats(); toast("تم الفصل", "ok"); }
+  catch (e) { toast(e.message, "bad"); }
+}
+async function notifyTest() {
+  try {
+    const r = await api("notifyTest");
+    toast(r.failed ? `اتبعت لـ ${r.sent} وفشل لـ ${r.failed} (التفاصيل تحت المحادثة)` : `اتبعت التنبيه التجريبي لـ ${r.sent} محادثة ✅`, r.failed ? "bad" : "ok");
+    const st = await api("notifyGet"); notifyState = st; renderNotifyChats();
+    const l = $("nf-last"); if (l && st.last) l.textContent = `آخر إرسال: ${fmtTime(st.last.t)} · ${st.last.failed ? `فشل لـ ${st.last.failed} محادثة` : "نجح"}`;
+  } catch (e) { toast(e.message, "bad"); }
 }
 
 function moreRow(total, shown, action) {
