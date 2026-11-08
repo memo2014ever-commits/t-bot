@@ -2258,7 +2258,7 @@ async function loadStats() {
       <div class="card"><div class="row"><h2 style="margin:0">الضغطات آخر 7 أيام</h2><div class="row" style="gap:6px"><label class="muted">يوم محدد: <input id="dailyDate" type="date" onchange="loadDailyForDate(this.value)" style="width:auto"></label><button class="ghost" onclick="loadDailyForDate(\"\")">آخر 7 أيام</button><button class="ghost" onclick="exportDaily()">📥 تصدير</button></div></div>
         <p id="dailyMode" class="muted">الضغطات خلال آخر 7 أيام</p><div id="dailyChart" class="chart">${chart}</div></div>
 
-      <div class="card"><div class="row"><h2 style="margin:0">أكتر الزراير استخداماً (7 أيام)</h2><div class="row" style="gap:6px"><label class="muted">يوم محدد: <input id="buttonsDate" type="date" onchange="loadButtonsForDate(this.value)" style="width:auto"></label><button class="ghost" onclick="loadButtonsForDate(\"\")">آخر 7 أيام</button><button class="ghost" onclick="exportButtons()">📥 تصدير</button></div></div>
+      <div class="card" id="buttonsCard"><div class="row"><h2 style="margin:0">أكتر الزراير استخداماً (7 أيام)</h2><div class="row" style="gap:6px"><label class="muted">يوم محدد: <input id="buttonsDate" type="date" onchange="loadButtonsForDate(this.value)" style="width:auto"></label><button class="ghost" onclick="loadButtonsForDate(\"\")">آخر 7 أيام</button><button class="ghost" onclick="exportButtons()">📥 تصدير</button></div></div>
         <p id="buttonsMode" class="muted">أكتر الزراير استخدامًا خلال آخر 7 أيام</p><table id="buttonsTable"><tr><th>الزرار</th><th>الضغطات</th><th></th></tr>${usageRows(used)}</table></div>
 
       <div class="card"><div class="row"><h2 style="margin:0">زراير ما اتداستش (7 أيام)</h2><button class="ghost" onclick="exportUnused()">📥 تصدير</button></div>
@@ -2270,13 +2270,50 @@ async function loadStats() {
         <table id="hoursTable"><tr><th>الساعة</th><th>الضغطات</th><th></th></tr>${hoursRows}</table>
         <p class="muted" style="margin:10px 0 0">الساعات بتوقيت القاهرة، والبيانات محفوظة تاريخيًا.</p></div>
 
-      <div class="card"><div class="row"><h2 style="margin:0">🔤 أكتر الكلمات اللي ما اتطابقتش</h2><div class="row" style="gap:6px"><button class="ghost" onclick="exportUnmatched()">📥 تصدير</button><button class="danger" onclick="deleteSelectedUnmatched()">🗑 حذف المحدد</button><button class="danger" onclick="clearAllUnmatched()">🧹 حذف الكل</button></div></div>
+      <div class="card" id="unmatchedCard"><div class="row"><h2 style="margin:0">🔤 أكتر الكلمات اللي ما اتطابقتش</h2><div class="row" style="gap:6px"><button class="ghost" onclick="exportUnmatched()">📥 تصدير</button><button class="danger" onclick="deleteSelectedUnmatched()">🗑 حذف المحدد</button><button class="danger" onclick="clearAllUnmatched()">🧹 حذف الكل</button></div></div>
         <table><tr><th><input type="checkbox" onchange="toggleAllUnmatched(this)" aria-label="تحديد الكل"> الكلمة</th><th>عدد مرات الكتابة</th><th>إجراء</th></tr>${umRows}</table>
         <p class="muted" style="margin:10px 0 0">لو كلمة متكررة وملهاش رد، ضيفها في 🔑 كلمات الاستدعاء للزرار المناسب.</p></div>
 `;
+    makeStatsCollapsible();
   } catch (e) {
     box.innerHTML = `<div class="card" style="color:var(--bad)">${esc(e.message)}</div>`;
   }
+}
+
+// أقسام الإحصائيات اللي ممكن تتطوي (سهم على الشمال). مطوية افتراضياً، واختيارك بيتفتكر طول ما التاب مفتوح
+function collState() { try { return JSON.parse(sessionStorage.getItem("stats-coll") || "{}"); } catch { return {}; } }
+function makeCollapsible(cardId, key) {
+  const card = $(cardId);
+  if (!card || card.querySelector(":scope > .coll-body")) return;
+  const header = card.querySelector(":scope > .row");
+  if (!header) return;
+  const body = document.createElement("div");
+  body.className = "coll-body";
+  [...card.children].filter((c) => c !== header).forEach((c) => body.appendChild(c));
+  card.appendChild(body);
+  const controls = header.querySelector(":scope > .row") || header;
+  const arrow = document.createElement("button");
+  arrow.type = "button"; arrow.className = "ghost coll-arrow"; arrow.title = "إظهار / إخفاء";
+  arrow.style.cssText = "padding:2px 10px;font-size:18px;line-height:1.4";
+  const apply = (open) => {
+    body.style.display = open ? "block" : "none";
+    arrow.textContent = open ? "▴" : "▾";
+    arrow.setAttribute("aria-expanded", String(open));
+    [...controls.children].forEach((c) => { if (c !== arrow) c.style.display = open ? "" : "none"; });   // أدوات القسم تظهر وهو مفتوح بس
+  };
+  arrow.onclick = () => {
+    const open = body.style.display === "none";
+    apply(open);
+    const st = collState(); st[key] = open;
+    try { sessionStorage.setItem("stats-coll", JSON.stringify(st)); } catch {}
+  };
+  controls.appendChild(arrow);
+  apply(!!collState()[key]);
+}
+function makeStatsCollapsible() {
+  makeCollapsible("buttonsCard", "buttons");
+  makeCollapsible("hoursCard", "hours");
+  makeCollapsible("unmatchedCard", "unmatched");
 }
 
 // ---------- سجل النسخ ----------
