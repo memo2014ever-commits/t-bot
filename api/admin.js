@@ -5,6 +5,7 @@ import { getStats, getStatsByDay, getQuestions, deleteQuestion, answerQuestion, 
   getIntake, setIntake, computeQuestionStats, DEFAULT_INTAKE_MESSAGE, MAX_FOLLOWUPS, MAX_EXTRA_PER_OPERATION, getExtraFollowups, getAllExtras, limitForItem, followupLimitState, adjustQuestionExtra, clearPermanentExtra, claimOperation, logLimitChange, getLimitLog } from "./stats.js";
 import { phoneFeatureEnabled, phoneSharedCount, customerMap, listCustomers, customerDetail } from "./customers.js";
 import { explainError } from "./errors.js";
+import { getNotifyConfig, setNotifyConfig, listNotifyChats, unlinkNotifyChat, createLinkCode, getNotifyLast, sendNotifyTest, botUsername, MAX_NOTIFY_CHATS, LINK_CODE_TTL } from "./notify.js";
 
 const {
   ADMIN_USER, ADMIN_PASS,          // الأدمن: يعدّل ويحذف
@@ -241,6 +242,34 @@ export default async function handler(req, res) {
       const ok = await setIntake(req.body.enabled, msg, username);
       if (!ok) return res.status(500).json({ error: "فشل حفظ الإعداد، لم يتم تغيير أي شيء" });
       return res.json({ ok: true, ...(await getIntake()), defaultMessage: DEFAULT_INTAKE_MESSAGE });
+    }
+
+    // ---------- تنبيهات الموظفين على تيليجرام (أدمن فقط) ----------
+    if (typeof action === "string" && action.startsWith("notify")) {
+      if (role !== "admin") return res.status(403).json({ error: "إعدادات التنبيهات للأدمن بس" });
+      if (action === "notifyGet") {
+        return res.json({ config: await getNotifyConfig(), chats: await listNotifyChats(), last: await getNotifyLast(), bot: await botUsername(), maxChats: MAX_NOTIFY_CHATS, codeTtl: LINK_CODE_TTL });
+      }
+      if (action === "notifySet") {
+        const r = await setNotifyConfig(req.body.config && typeof req.body.config === "object" ? req.body.config : {});
+        if (r.error) return res.status(400).json({ error: r.error });
+        return res.json({ ok: true, config: r.config });
+      }
+      if (action === "notifyLinkCode") {
+        const r = await createLinkCode();
+        if (r.error) return res.status(400).json({ error: r.error });
+        return res.json({ ok: true, code: r.code, expiresIn: r.expiresIn, bot: await botUsername() });
+      }
+      if (action === "notifyUnlink") {
+        if (typeof ref !== "string" || !/^-?\d{1,20}$/.test(ref.trim())) return res.status(400).json({ error: "معرف المحادثة غير صحيح" });
+        const ok = await unlinkNotifyChat(ref.trim());
+        return ok ? res.json({ ok: true }) : res.status(404).json({ error: "المحادثة دي مش مربوطة" });
+      }
+      if (action === "notifyTest") {
+        const r = await sendNotifyTest();
+        if (r.error) return res.status(400).json({ error: r.error });
+        return res.json(r);
+      }
     }
 
     // ---------- العملاء وأرقام الهواتف ----------

@@ -3,6 +3,7 @@ import { Bot, InlineKeyboard, Keyboard, webhookCallback } from "grammy";
 import {
   trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, getIntake, DEFAULT_INTAKE_MESSAGE, questionForReply, addFollowup, closeExpiredQuestions, maybeExpireQuestions, setPending, takePending, isBanned, setPendingImage, takePendingImage,
 } from "./stats.js";
+import { notifyStaffSafe, getNotifyConfig, consumeLinkCode, unlinkNotifyChat, MAX_NOTIFY_CHATS } from "./notify.js";
 import { phoneFeatureEnabled, claimPhonePrompt, phonePromptDue, hasPhone, savePhone, skipPhone, upsertInfo, normalizePhone } from "./customers.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
@@ -296,6 +297,28 @@ bot.callbackQuery("sharephone", async (ctx) => {
   return sendPhonePrompt(ctx, m);
 });
 
+// ربط / فصل تنبيهات الموظفين: /notify الكود  ،  /notify stop
+bot.command("notify", async (ctx) => {
+  const chat = ctx.chat;
+  if (!chat) return;
+  try { if (chat.type === "private" && (await isBanned(chat.id))) return; } catch {}
+  const arg = String(ctx.match || "").trim();
+  try {
+    if (/^(stop|off)$/i.test(arg)) return ctx.reply((await unlinkNotifyChat(chat.id)) ? "تم إيقاف التنبيهات على المحادثة دي." : "المحادثة دي مش مربوطة بالتنبيهات.");
+    if (!arg) return ctx.reply("لربط التنبيهات: افتح اللوحة، واضغط «ربط محادثة»، وابعت هنا:\n/notify الكود");
+    const label = chat.type === "private" ? ([ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || "محادثة خاصة") : (chat.title || "جروب");
+    const r = await consumeLinkCode(arg, { id: chat.id, type: chat.type, label });
+    if (r.ok) {
+      const cfg = await getNotifyConfig().catch(() => ({ enabled: true }));
+      return ctx.reply(`تم ربط التنبيهات ✅${r.already ? " (المحادثة دي كانت مربوطة)" : ""}\nهتوصلك رسالة هنا لما يجي سؤال أو متابعة جديدة.${cfg.enabled ? "" : "\n\nملحوظة: التنبيهات متوقفة دلوقتي من اللوحة، شغّلها من هناك."}\nلإيقافها: /notify stop`);
+    }
+    if (r.error === "many") return ctx.reply("محاولات كتير غلط. استنى 10 دقايق وجرّب تاني.");
+    if (r.error === "full") return ctx.reply(`وصلت للحد الأقصى (${MAX_NOTIFY_CHATS} محادثات). افصل محادثة من اللوحة الأول.`);
+    if (r.error === "save") return ctx.reply("حصلت مشكلة وأنا بحفظ الربط. جرّب تاني.");
+    return ctx.reply("الكود غير صحيح أو منتهي. اطلب كود جديد من اللوحة.");
+  } catch (e) { console.error("[notify] link failed:", e?.message); }
+});
+
 bot.command("start", async (ctx) => {
   try { if (await isBanned(ctx.chat.id)) return; } catch {}
   const { text, markup } = await renderFor(ctx, await getContent(), "");
@@ -362,14 +385,18 @@ async function saveAndThank(ctx, text, m, root, attachments = []) {
       if (pendUrl) finalAttachments = [{ type: "image", url: pendUrl }];
     } catch {}
   }
+  let saved = false;
   try {
     const pushed = await pushQuestion(text, ctx.chat.id, customerName, finalAttachments, ctx.from?.username || "");
     if (pushed && pushed.ok === false) return ctx.reply(toHtml((await getIntake().catch(() => ({}))).message || DEFAULT_INTAKE_MESSAGE), HTML_OPTS(root));
+    saved = true;
   } catch {}
   try { if (phoneFeatureEnabled()) await upsertInfo(ctx.from); } catch {}
   const left = await questionsLeft(ctx.chat.id).catch(() => 0);
   const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
-  return ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
+  const thanks = await ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
+  if (saved) await notifyStaffSafe({ kind: "question", name: customerName, text });   // بعد ما العميل خد ردّه
+  return thanks;
 }
 
 // اختيارات "تقصد؟" (وممكن زرار بديل لو ده مش قصده)
@@ -460,7 +487,11 @@ async function handleMessageCore(ctx, text, msg) {
       if (!followupText) return ctx.reply(m.followupLimit || DEFAULT_FOLLOWUP_LIMIT, HTML_OPTS(root));
       const followup = await addFollowup(parent.id, followupText, attachments).catch(() => null);
       if (followup?.limitReached) return ctx.reply(m.followupLimit || DEFAULT_FOLLOWUP_LIMIT, HTML_OPTS(root));
-      if (followup) return ctx.reply(m.followupReceived || DEFAULT_FOLLOWUP_RECEIVED, HTML_OPTS(root));
+      if (followup) {
+        const sent = await ctx.reply(m.followupReceived || DEFAULT_FOLLOWUP_RECEIVED, HTML_OPTS(root));
+        await notifyStaffSafe({ kind: "followup", n: (followup.followups || []).length, name: parent.customerName, text: followupText });
+        return sent;
+      }
     }
   }
 
