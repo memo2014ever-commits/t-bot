@@ -5,6 +5,7 @@ import { getStats, getStatsByDay, getQuestions, deleteQuestion, answerQuestion, 
   getIntake, setIntake, computeQuestionStats, DEFAULT_INTAKE_MESSAGE, MAX_FOLLOWUPS, MAX_EXTRA_PER_OPERATION, getExtraFollowups, getAllExtras, limitForItem, followupLimitState, adjustQuestionExtra, clearPermanentExtra, claimOperation, logLimitChange, getLimitLog } from "./stats.js";
 import { phoneFeatureEnabled, phoneSharedCount, customerMap, listCustomers, customerDetail } from "./customers.js";
 import { explainError } from "./errors.js";
+import { registryCount, backfillRegistry } from "./registry.js";
 import { getNotifyConfig, setNotifyConfig, listNotifyChats, unlinkNotifyChat, createLinkCode, getNotifyLast, sendNotifyTest, botUsername, MAX_NOTIFY_CHATS, LINK_CODE_TTL } from "./notify.js";
 
 const {
@@ -123,6 +124,9 @@ export default async function handler(req, res) {
       const total = Math.max(Number(st.subscribersTotal) || 0, shared);
       st.questionStats = computeQuestionStats(await getQuestions().catch(() => []));
       st.intake = await getIntake();
+      // قاعدة المشتركين المسجّلين بالـ ID (مختلفة عن "إجمالي المشتركين (تقريبي)" القديم)
+      const regCount = await registryCount().catch(() => 0);
+      st.registry = { count: regCount, coverage: Number(st.subscribersTotal) > 0 ? Math.min(100, Math.round((regCount / Number(st.subscribersTotal)) * 1000) / 10) : 0 };
       st.phones = {
         enabled: phoneFeatureEnabled(), shared, notShared: Math.max(0, total - shared), total,
         rate: total > 0 ? Math.min(100, Math.round((shared / total) * 1000) / 10) : 0,
@@ -242,6 +246,12 @@ export default async function handler(req, res) {
       const ok = await setIntake(req.body.enabled, msg, username);
       if (!ok) return res.status(500).json({ error: "فشل حفظ الإعداد، لم يتم تغيير أي شيء" });
       return res.json({ ok: true, ...(await getIntake()), defaultMessage: DEFAULT_INTAKE_MESSAGE });
+    }
+
+    // ---------- قاعدة المشتركين: استيراد المعروفين دلوقتي (أدمن فقط) ----------
+    if (action === "registryBackfill") {
+      if (role !== "admin") return res.status(403).json({ error: "استيراد المشتركين للأدمن بس" });
+      return res.json({ ok: true, ...(await backfillRegistry()) });
     }
 
     // ---------- تنبيهات الموظفين على تيليجرام (أدمن فقط) ----------

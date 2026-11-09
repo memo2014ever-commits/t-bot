@@ -3,12 +3,19 @@ import { Bot, InlineKeyboard, Keyboard, webhookCallback } from "grammy";
 import {
   trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, getIntake, DEFAULT_INTAKE_MESSAGE, questionForReply, addFollowup, closeExpiredQuestions, maybeExpireQuestions, setPending, takePending, isBanned, setPendingImage, takePendingImage,
 } from "./stats.js";
+import { trackSubscriber } from "./registry.js";
 import { notifyStaffSafe, getNotifyConfig, consumeLinkCode, unlinkNotifyChat, MAX_NOTIFY_CHATS } from "./notify.js";
 import { phoneFeatureEnabled, claimPhonePrompt, phonePromptDue, hasPhone, savePhone, skipPhone, upsertInfo, normalizePhone } from "./customers.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
 const IMGBB_API_KEY = process.env.IMGBB_API_KEY;
 const bot = new Bot(process.env.BOT_TOKEN);
+
+// تسجيل كل عميل (ID بس) في قاعدة المشتركين أول ما يتفاعل. أي فشل هنا ما يوقفش البوت.
+bot.use(async (ctx, next) => {
+  try { await trackSubscriber(ctx); } catch {}
+  await next();
+});
 
 async function uploadToImgBB(fileId) {
   try {
