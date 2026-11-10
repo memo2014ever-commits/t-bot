@@ -9,6 +9,7 @@ export function dayKey(offset = 0) {
   return d.toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
 }
 export const todayKey = () => dayKey(0);
+export const cairoDayOf = (ts) => new Date(Number(ts)).toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
 
 // آخر خطأ رجّعته قاعدة البيانات (علشان رسالة الخطأ في اللوحة تقدر تقول السبب). السلوك نفسه: الفشل بيرجّع null زي الأول.
 let lastRedisError = null;
@@ -469,6 +470,15 @@ export async function getStatsByDay(date) {
   const [hours, press] = await Promise.all([hoursForDate(date), redis(["HGETALL", `stats:press:${date}`])]);
   const byPath = toObj(press);
   return { date, hours, presses: sum(byPath), byPath, peak: peakHour(hours) };
+}
+
+// ملخص يوم محدد للكروت العلوية: مشتركون جدد / نشطون / ضغطات / وقت الذروة
+export async function getOverviewDay(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("تاريخ غير صحيح");
+  const [newSubs, active, day] = await Promise.all([
+    redis(["PFCOUNT", `subs:new:day:${date}`]), redis(["PFCOUNT", `active:day:${date}`]), getStatsByDay(date),
+  ]);
+  return { date, newSubs: newSubs ?? 0, active: active ?? 0, presses: day.presses, peak: day.peak };
 }
 
 // التصفير يظل يدويًا فقط، ويمسح كل المفاتيح التاريخية المطابقة بدون حد 90 يومًا.

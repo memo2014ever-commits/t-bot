@@ -3,7 +3,7 @@
 // - رقم الهاتف بيتخزن مشفّر AES-256-GCM بمفتاح من متغير البيئة PHONE_ENC_KEY (مش في الكود ولا GitHub).
 // - مفيش أي طباعة لأرقام الهواتف في الـ logs.
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
-import { redis } from "./stats.js";
+import { redis, cairoDayOf } from "./stats.js";
 
 // ثلاث hashes (كل hash: chatId -> قيمة)، عشان قراءتها كلها أمر Redis واحد
 const INFO = "cu:info";   // JSON: { n: الاسم, u: username, fs: أول تفاعل مسجل (ms), pt: وقت مشاركة الرقم }
@@ -209,4 +209,12 @@ export async function customerDetail(chatId, { withPhones = false } = {}) {
 
 export async function phoneSharedCount() {
   return Number((await redis(["HLEN", PH])) ?? 0) || 0;
+}
+
+// عدد اللي شاركوا أرقامهم في يوم محدد (من وقت المشاركة pt المسجّل في سجل العميل؛ بدون أي رقم هاتف)
+export async function phonesSharedOnDay(date) {
+  const o = toObj((await redis(["HGETALL", INFO])) || []);
+  let n = 0;
+  for (const v of Object.values(o)) { const pt = parse(v)?.pt; if (pt && cairoDayOf(pt) === date) n++; }
+  return n;
 }

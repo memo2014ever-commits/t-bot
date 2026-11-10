@@ -2,7 +2,7 @@
 // - قبل كده المشتركين كانوا بيتعدّوا بـ HyperLogLog (رقم تقريبي من غير IDs)، فمكنش ينفع نعرف مين هم.
 // - دلوقتي كل عميل (محادثة خاصة) بيتسجّل أول ما يتفاعل مع البوت، ID بس + أول ظهور (مفيش أسماء ولا أرقام هواتف).
 // - التسجيل مش بيغيّر أي سلوك: لو فشل، البوت بيكمل عادي. ومفيش إرسال لأي حد من هنا.
-import { redis, getQuestions } from "./stats.js";
+import { redis, getQuestions, cairoDayOf } from "./stats.js";
 
 const REG = "subs:reg";   // hash: chatId -> أول ظهور (ms)
 const seen = new Set();   // كاش في ذاكرة النسخة الشغّالة: بيوفّر أمر Redis لكل تفاعل متكرر من نفس العميل
@@ -25,6 +25,12 @@ export async function trackSubscriber(ctx) {
 
 export async function registryCount() {
   return Number((await redis(["HLEN", REG])) ?? 0) || 0;
+}
+
+// عدد المسجّلين بالـ ID في يوم محدد (بتوقيت القاهرة)، من وقت أول ظهور المخزّن
+export async function registeredOnDay(date) {
+  const o = toObj((await redis(["HGETALL", REG])) || []);
+  return Object.values(o).filter((t) => Number(t) > 0 && cairoDayOf(t) === date).length;
 }
 
 function toObj(arr) { const o = {}; for (let i = 0; i < (arr?.length || 0); i += 2) o[arr[i]] = arr[i + 1]; return o; }

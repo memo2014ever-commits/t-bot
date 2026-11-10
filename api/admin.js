@@ -1,11 +1,11 @@
 // خادم لوحة التحكم: تسجيل دخول بدورين (أدمن / محرر)، وقراءة وحفظ وسجل نسخ من GitHub
 // كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
 import { timingSafeEqual, createHash } from "crypto";
-import { getStats, getStatsByDay, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched, banUser, unbanUser, getBans, getBanInfo, redis,
+import { getStats, getStatsByDay, getOverviewDay, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched, banUser, unbanUser, getBans, getBanInfo, redis,
   getIntake, setIntake, computeQuestionStats, DEFAULT_INTAKE_MESSAGE, MAX_FOLLOWUPS, MAX_EXTRA_PER_OPERATION, getExtraFollowups, getAllExtras, limitForItem, followupLimitState, adjustQuestionExtra, clearPermanentExtra, claimOperation, logLimitChange, getLimitLog } from "./stats.js";
-import { phoneFeatureEnabled, phoneSharedCount, customerMap, listCustomers, customerDetail } from "./customers.js";
+import { phonesSharedOnDay, phoneFeatureEnabled, phoneSharedCount, customerMap, listCustomers, customerDetail } from "./customers.js";
 import { explainError } from "./errors.js";
-import { registryCount, backfillRegistry } from "./registry.js";
+import { registryCount, backfillRegistry, registeredOnDay } from "./registry.js";
 import { getNotifyConfig, setNotifyConfig, listNotifyChats, unlinkNotifyChat, createLinkCode, getNotifyLast, sendNotifyTest, botUsername, MAX_NOTIFY_CHATS, LINK_CODE_TTL } from "./notify.js";
 
 const {
@@ -139,6 +139,19 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: "تاريخ غير صحيح" });
       }
       return res.json(await getStatsByDay(ref));
+    }
+
+    // ملخص يوم محدد للكروت العلوية (قسم الإحصائيات)
+    if (action === "overviewDay") {
+      if (typeof ref !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(ref)) return res.status(400).json({ error: "تاريخ غير صحيح" });
+      return res.json(await getOverviewDay(ref));
+    }
+
+    // إحصائيات العملاء ليوم محدد: المشاركون بأرقامهم + المسجّلون بالـ ID
+    if (action === "customersDay") {
+      if (typeof ref !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(ref)) return res.status(400).json({ error: "تاريخ غير صحيح" });
+      const [shared, registered] = await Promise.all([phonesSharedOnDay(ref).catch(() => 0), registeredOnDay(ref).catch(() => 0)]);
+      return res.json({ date: ref, shared, registered });
     }
 
     if (action === "questions") {
