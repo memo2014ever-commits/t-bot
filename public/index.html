@@ -2073,13 +2073,39 @@ function updateQuestionCards() {   // بيحدّث الأرقام فوراً ب�
   const cc = $("qs-closedcard"); if (cc) cc.innerHTML = closedCardHtml(c.ct, c.cm, c.cx);
   set("qs-wait", `منهم ${c.wait} في انتظار رد العميل`);
 }
-async function registryBackfill() {
-  if (!(await confirmBox("هيتم تسجيل كل العملاء المعروفين دلوقتي (أصحاب الأسئلة، وسجل العملاء، ومن اتعامل معاهم بخصوص رقم الهاتف، والمحظورين). مفيش حاجة بتتمسح أو بتتغير، وممكن تتكرر. نكمل؟", "استيراد"))) return;
+
+// ---------- كروت العملاء + فلتر اليوم ----------
+function custKpisHtml(st) {
+  const p = st.phones || { shared: 0, notShared: 0, rate: 0 };
+  return `
+      <div class="kpi click" onclick="openCustomersList('shared')"><div class="n">${p.shared}</div><div class="l">📱 أرقام الهواتف المشتركة</div><div class="sub">اضغط لعرض العملاء</div></div>
+      <div class="kpi click" onclick="openCustomersList('notshared')"><div class="n">${p.notShared}</div><div class="l">🚫 لم يشاركوا أرقامهم</div><div class="sub">يشمل من لم يظهر له الطلب بعد، وليس رفضاً بالضرورة</div></div>
+      <div class="kpi"><div class="n">${p.rate}%</div><div class="l">📊 نسبة مشاركة الأرقام</div><div class="sub">المشاركون ÷ إجمالي المشتركين (تقريبي)</div></div>
+      <div class="kpi"><div class="n">${(st.registry || {}).count || 0}</div><div class="l">📇 المشتركين المسجلين ب id</div></div>`;
+}
+async function loadCustomersDay(date) {
   try {
-    const r = await api("registryBackfill");
-    toast(`تم الاستيراد: اتضاف ${r.added} (الإجمالي ${r.after})`, "ok");
-    const el = $("reg-result"); if (el) el.textContent = `آخر استيراد: اتضاف ${r.added} من ${r.known} معروف`;
-    loadStats();
+    if (!date) { $("custKpis").innerHTML = custKpisHtml(lastStats || {}); $("custMode").textContent = "الإجمالي"; if ($("custDate")) $("custDate").value = ""; return; }
+    const d = await api("customersDay", { ref: date });
+    $("custKpis").innerHTML = `
+      <div class="kpi"><div class="n">${d.shared}</div><div class="l">📱 شاركوا أرقامهم في اليوم ده</div></div>
+      <div class="kpi"><div class="n">${d.registered}</div><div class="l">📇 تسجّلوا بالـ id في اليوم ده</div></div>`;
+    $("custMode").textContent = `بيانات يوم ${date} فقط`;
+  } catch (e) { toast(e.message, "bad"); }
+}
+// ---------- الكروت العلوية + فلتر اليوم ----------
+let mainKpisDefault = "";
+async function loadOverviewDay(date) {
+  try {
+    if (!date) { $("mainKpis").innerHTML = mainKpisDefault; $("overviewMode").textContent = "الإجمالي / اليوم"; if ($("overviewDate")) $("overviewDate").value = ""; return; }
+    const d = await api("overviewDay", { ref: date });
+    const pk = d.peak ? `${String(d.peak.hour).padStart(2, "0")}:00 (${d.peak.count} ضغطة)` : "لا توجد بيانات";
+    $("mainKpis").innerHTML = `
+      <div class="kpi"><div class="n">${d.newSubs}</div><div class="l">🆕 مشتركون جدد في اليوم ده</div></div>
+      <div class="kpi"><div class="n">${d.active}</div><div class="l">🟢 نشطون في اليوم ده</div></div>
+      <div class="kpi"><div class="n">${d.presses}</div><div class="l">👆 ضغطات اليوم ده</div></div>
+      <div class="kpi"><div class="n" style="font-size:21px">${pk}</div><div class="l">🕒 وقت الذروة في اليوم ده</div></div>`;
+    $("overviewMode").textContent = `بيانات يوم ${date} فقط`;
   } catch (e) { toast(e.message, "bad"); }
 }
 function statsSectionsHtml(st) {
@@ -2087,21 +2113,11 @@ function statsSectionsHtml(st) {
   const q = st.questionStats || { total: 0, open: 0, followupPending: 0, awaitingCustomer: 0, closed: 0, archiveTotal: 0 };
   const on = st.intake ? st.intake.enabled : true;
   return `
-    <h2 class="sect">👥 إحصائيات العملاء</h2>
+    <div class="row" style="margin-top:6px"><h2 class="sect" style="margin:0">👥 إحصائيات العملاء</h2>
+      <div class="row" style="gap:6px"><label class="muted">يوم محدد: <input id="custDate" type="date" onchange="loadCustomersDay(this.value)" style="width:auto"></label><button class="ghost" onclick="loadCustomersDay('')">الإجمالي</button></div></div>
+    <p id="custMode" class="muted" style="margin:4px 0 8px">الإجمالي</p>
     ${p.enabled ? "" : `<div class="card" style="border-color:#fedf89">⚠️ مشاركة الأرقام غير مفعلة: ضيف المتغير <b dir="ltr">PHONE_ENC_KEY</b> في Vercel ثم Redeploy (الخطوات في التقرير).</div>`}
-    <div class="kpis">
-      <div class="kpi click" onclick="openCustomersList('shared')"><div class="n">${p.shared}</div><div class="l">📱 أرقام الهواتف المشتركة</div><div class="sub">اضغط لعرض العملاء</div></div>
-      <div class="kpi click" onclick="openCustomersList('notshared')"><div class="n">${p.notShared}</div><div class="l">🚫 لم يشاركوا أرقامهم</div><div class="sub">يشمل من لم يظهر له الطلب بعد، وليس رفضاً بالضرورة</div></div>
-      <div class="kpi"><div class="n">${p.rate}%</div><div class="l">📊 نسبة مشاركة الأرقام</div><div class="sub">المشاركون ÷ إجمالي المشتركين (تقريبي)</div></div>
-    </div>
-    <div class="card" id="registryCard" style="margin-top:12px">
-      <div class="row"><div><h3 style="margin:0;font-size:15px">📇 قاعدة المشتركين المسجّلين بالـ ID</h3>
-        <div class="muted" style="font-size:12px;margin-top:4px">الأساس لأي إرسال مستقبلي. بتسجّل الـ ID فقط، من غير اسم أو رقم هاتف.</div></div>
-        <div style="text-align:center"><div class="n" id="reg-count" style="font-size:26px;font-weight:700">${(st.registry || {}).count || 0}</div>
-          <div class="muted" style="font-size:12px">مسجّل · تغطية <span id="reg-cov">${(st.registry || {}).coverage || 0}</span>% من الإجمالي التقريبي</div></div></div>
-      <p class="muted" style="margin:10px 0 6px;font-size:12px">العميل بيتسجّل أول ما يتفاعل مع البوت (أي رسالة أو ضغطة زرار). العملاء القدام اللي ما فتحوش البوت من وقت التحديث ما بيظهروش لحد ما يتفاعلوا. الرقم ده غير «إجمالي المشتركين (تقريبي)» فوق، لأن ده تقدير من غير IDs.</p>
-      ${role === "admin" ? '<button class="ghost" onclick="registryBackfill()">⬇️ استيراد المعروفين الآن</button> <span id="reg-result" class="muted"></span>' : ""}
-    </div>
+    <div class="kpis" id="custKpis">${custKpisHtml(st)}</div>
     <h2 class="sect">📋 إحصائيات الأسئلة</h2>
     <div class="${on ? "status ok" : "status warn"}" style="margin-bottom:10px">${on ? "✅ استقبال الأسئلة الجديدة مفعل" : "⏸️ استقبال الأسئلة الجديدة متوقف مؤقتاً"}</div>
     <div class="kpis">
@@ -2263,7 +2279,10 @@ async function loadStats() {
       : '<span class="muted">كل الأزرار اتداست خلال آخر 7 أيام ✅</span>';
 
     box.innerHTML = `
-      <div class="kpis">
+      <div class="row"><h2 class="sect" style="margin:0">📊 الإحصائيات العامة</h2>
+        <div class="row" style="gap:6px"><label class="muted">يوم محدد: <input id="overviewDate" type="date" onchange="loadOverviewDay(this.value)" style="width:auto"></label><button class="ghost" onclick="loadOverviewDay('')">الإجمالي / اليوم</button></div></div>
+      <p id="overviewMode" class="muted" style="margin:4px 0 8px">الإجمالي / اليوم</p>
+      <div class="kpis" id="mainKpis">
         <div class="kpi"><div class="n">${st.subscribersTotal}</div><div class="l">👥 إجمالي المشتركين (تقريبي)</div></div>
         <div class="kpi"><div class="n">${st.newSubscribersToday ?? 0}</div><div class="l">🆕 مشتركون جدد اليوم</div></div>
         <div class="kpi"><div class="n">${st.activeToday ?? 0}</div><div class="l">🟢 نشطون اليوم</div></div>
@@ -2291,6 +2310,7 @@ async function loadStats() {
         <table><tr><th><input type="checkbox" onchange="toggleAllUnmatched(this)" aria-label="تحديد الكل"> الكلمة</th><th>عدد مرات الكتابة</th><th>إجراء</th></tr>${umRows}</table>
         <p class="muted" style="margin:10px 0 0">لو كلمة متكررة وملهاش رد، ضيفها في 🔑 كلمات الاستدعاء للزرار المناسب.</p></div>
 `;
+    mainKpisDefault = $("mainKpis").innerHTML;
     makeStatsCollapsible();
   } catch (e) {
     box.innerHTML = `<div class="card" style="color:var(--bad)">${esc(e.message)}</div>`;
