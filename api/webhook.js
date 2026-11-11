@@ -11,6 +11,17 @@ const CONTENT_URL = process.env.CONTENT_URL;
 const IMGBB_API_KEY = process.env.IMGBB_API_KEY;
 const bot = new Bot(process.env.BOT_TOKEN);
 
+// ---- فيديو من القناة البرايفت: الزرار اللي فيه videoMsgId بيبعت نسخة من رسالة القناة للعميل (من غير "forwarded from") ----
+// VIDEO_CHANNEL_ID = معرّف القناة (-100xxxxxxxxxx) ، VIDEO_PROTECT=1 (اختياري) يمنع العميل من تحويل/حفظ الفيديو
+const VIDEO_CHANNEL_ID = process.env.VIDEO_CHANNEL_ID;
+async function sendNodeVideo(ctx, node) {
+  const id = Number(node?.videoMsgId);
+  if (!VIDEO_CHANNEL_ID || !Number.isInteger(id) || id <= 0 || !ctx.chat?.id) return;
+  try {
+    await ctx.api.copyMessage(ctx.chat.id, VIDEO_CHANNEL_ID, id, { protect_content: process.env.VIDEO_PROTECT === "1" });
+  } catch (e) { console.error("[video] copyMessage failed:", e?.description || e?.message); }   // فشل الفيديو ما يوقفش الرد
+}
+
 // تسجيل كل عميل (ID بس) في قاعدة المشتركين أول ما يتفاعل. أي فشل هنا ما يوقفش البوت.
 bot.use(async (ctx, next) => {
   try { await trackSubscriber(ctx); } catch {}
@@ -341,6 +352,7 @@ async function showNode(ctx, path, track) {
     const node = getNode(await getContent(), path);
     const { text, markup } = await renderFor(ctx, node, path);
     await ctx.answerCallbackQuery();
+    await sendNodeVideo(ctx, node);
     await ctx.reply(toHtml(text), HTML_OPTS(markup));
     if (track) { try { await trackPress(path, node.label); } catch {} }
     await maybePromptPhone(ctx);
@@ -464,6 +476,7 @@ bot.callbackQuery(/^ask:(.*)$/, async (ctx) => {
 // يعرض إجابة زرار واحد (زي ما لو العميل داس عليه)
 async function showHit(ctx, hit) {
   try { await trackPress(hit.path, hit.node.label); } catch {}
+  await sendNodeVideo(ctx, hit.node);
   if (hit.node.url) {
     const kb = new InlineKeyboard().url(hit.node.label, hit.node.url);
     return ctx.reply(toHtml(hit.node.text || hit.node.label), HTML_OPTS(kb));
