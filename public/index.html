@@ -1042,6 +1042,7 @@ function excelDownload(fileName, rows) {
 }
 
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
+const cairoDate = (ms) => new Date(Number(ms)).toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
 
 function dailyRows(st) {
   return [["التاريخ", "مشتركين جداد", "ضغطات"], ...st.daily.map((d) => [d.date, d.newSubs, d.presses])];
@@ -1066,8 +1067,7 @@ function exportAll() {
     ["ضغطات امبارح", st.pressesYesterday],
     [],
     ...dailyRows(st), [],
-    ...buttonRows(st), [],
-    ...unusedRows(st),
+    ...buttonRows(st),
   ];
   csvDownload(`تقرير_البوت_${today()}.csv`, rows);
 }
@@ -1101,7 +1101,6 @@ function openReport() {
   </div>
   <h2>يومي (آخر 7 أيام)</h2>${table(dailyRows(st))}
   <h2>أكتر الزراير استخداماً</h2>${table(buttonRows(st))}
-  <h2>زراير ما اتداستش</h2>${table(unusedRows(st))}
   <br><button onclick="window.print()">🖨 طباعة / حفظ PDF</button>
   </body></html>`;
   const w = window.open("", "_blank");
