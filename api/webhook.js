@@ -1,10 +1,10 @@
 // بوت تلجرام: قايمة + رجوع + روابط + زرار سؤال + بحث بالكلمات + تحويل الطبي للخط الساخن
 import { Bot, InlineKeyboard, Keyboard, webhookCallback } from "grammy";
 import {
-  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, trackUnmatched, getIntake, DEFAULT_INTAKE_MESSAGE, questionForReply, addFollowup, closeExpiredQuestions, maybeExpireQuestions, setPending, takePending, isBanned, setPendingImage, takePendingImage,
+  trackVisitor, trackActive, trackPress, pushQuestion, questionAllowed, questionsLeft, MAX_QUESTIONS_COUNT, getIntake, DEFAULT_INTAKE_MESSAGE, questionForReply, addFollowup, getQuestions, answerQuestion, getExtraFollowups, limitForItem, maybeExpireQuestions, setPending, takePending, isBanned, setPendingImage, takePendingImage,
 } from "./stats.js";
 import { trackSubscriber } from "./registry.js";
-import { notifyStaffSafe, getNotifyConfig, consumeLinkCode, unlinkNotifyChat, MAX_NOTIFY_CHATS } from "./notify.js";
+import { notifyStaffSafe, getNotifyConfig, consumeLinkCode, unlinkNotifyChat, isNotifyChat, MAX_NOTIFY_CHATS } from "./notify.js";
 import { phoneFeatureEnabled, claimPhonePrompt, phonePromptDue, hasPhone, savePhone, skipPhone, upsertInfo, normalizePhone } from "./customers.js";
 
 const CONTENT_URL = process.env.CONTENT_URL;
@@ -77,6 +77,7 @@ const DEFAULT_LIMIT = "استنفدت عدد الأسئلة المسموحة ({m
 const DEFAULT_LEFT = "(باقي لك {left} أسئلة خلال 24 ساعة)";
 const DEFAULT_FOLLOWUP_RECEIVED = "تم استلام المتابعة على نفس السؤال ✅\nسيتم الرد عليك هنا.";
 const DEFAULT_FOLLOWUP_LIMIT = "تم الوصول للحد الأقصى للمتابعات على هذا السؤال. لو عندك استفسار جديد، استخدم زر «ابعت سؤالك» 👇";
+const DEFAULT_QUESTION_SAVE_ERROR = "حصلت مشكلة مؤقتة في حفظ سؤالك، وما اتسجلش عندنا. جرّب تبعته تاني بعد شوية من فضلك 🙏";
 const DEFAULT_INQUIRY = "للاستعلام عن موعدك أو حجزك، ادخل على بوت الحجز مباشرة 👇";
 const DEFAULT_INQUIRY_WORDS = ["استعلم", "استعلام", "موعدي", "حجزي", "متابعه", "حاله الطلب", "رقم الطلب"];
 const DEFAULT_MED_WORDS = ["علاج", "دوا", "دواء", "ادويه", "اعراض", "الم", "وجع", "مرض", "جرعه", "تشخيص", "حساسيه", "حراره"];
@@ -392,9 +393,10 @@ async function saveAndThank(ctx, text, m, root, attachments = []) {
   // استقبال الأسئلة الجديدة متوقف؟ نعتذر قبل ما نستهلك حد العميل اليومي أو ناخد الصورة المعلقة
   const intake = await getIntake().catch(() => ({ enabled: true }));
   if (!intake.enabled) return ctx.reply(toHtml(intake.message || DEFAULT_INTAKE_MESSAGE), HTML_OPTS(root));
-  let allowed = true;
-  try { allowed = await questionAllowed(ctx.chat.id); } catch {}
-  if (!allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(root));
+  let quota = null;
+  try { quota = await questionAllowed(ctx.chat.id); } catch {}
+  if (!quota) return ctx.reply(toHtml(m.questionSaveError || DEFAULT_QUESTION_SAVE_ERROR), HTML_OPTS(root));
+  if (!quota.allowed) return ctx.reply(fill(m.limitReached || DEFAULT_LIMIT, { max: MAX_QUESTIONS_COUNT }), HTML_OPTS(root));
   const customerName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || (ctx.from?.username ? `@${ctx.from.username}` : "");
   // لو مفيش مرفق جاي مع السؤال، نشوف لو في صورة معلقة من قبل
   let finalAttachments = attachments;
@@ -404,17 +406,18 @@ async function saveAndThank(ctx, text, m, root, attachments = []) {
       if (pendUrl) finalAttachments = [{ type: "image", url: pendUrl }];
     } catch {}
   }
-  let saved = false;
+  let pushed = null;
   try {
-    const pushed = await pushQuestion(text, ctx.chat.id, customerName, finalAttachments, ctx.from?.username || "");
-    if (pushed && pushed.ok === false) return ctx.reply(toHtml((await getIntake().catch(() => ({}))).message || DEFAULT_INTAKE_MESSAGE), HTML_OPTS(root));
-    saved = true;
+    pushed = await pushQuestion(text, ctx.chat.id, customerName, finalAttachments, ctx.from?.username || "", true);
   } catch {}
+  if (!pushed?.ok) {
+    if (pushed?.reason === "intake_paused") return ctx.reply(toHtml(pushed.message || DEFAULT_INTAKE_MESSAGE), HTML_OPTS(root));
+    return ctx.reply(toHtml(m.questionSaveError || DEFAULT_QUESTION_SAVE_ERROR), HTML_OPTS(root));
+  }
   try { if (phoneFeatureEnabled()) await upsertInfo(ctx.from); } catch {}
-  const left = await questionsLeft(ctx.chat.id).catch(() => 0);
-  const tail = left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left }) : "";
+  const tail = quota.left > 0 ? "\n" + fill(m.remaining || DEFAULT_LEFT, { left: quota.left }) : "";
   const thanks = await ctx.reply(toHtml((m.askThanks || DEFAULT_THANKS) + tail), HTML_OPTS(root));
-  if (saved) await notifyStaffSafe({ kind: "question", name: customerName, text });   // بعد ما العميل خد ردّه
+  await notifyStaffSafe({ kind: "question", questionId: pushed.question.id, name: customerName, text });   // بعد ما السؤال اتحفظ والعميل خد ردّه
   return thanks;
 }
 
@@ -489,6 +492,64 @@ async function showHit(ctx, hit) {
   return ctx.reply(toHtml(text), HTML_OPTS(markup));
 }
 
+// الرد على رسالة التنبيه في جروب مربوط: QID يحدد السؤال، ولا يُقبل إلا من الجروب المرتبط.
+async function handleStaffGroupAnswer(ctx, text, msg, messages = {}) {
+  const reply = msg.reply_to_message;
+  if (!reply?.from?.is_bot) return false;
+  const original = String(reply.text || reply.caption || "");
+  const match = original.match(/\bQID:([a-f0-9-]{36})\b/i);
+  if (!match) return false;
+  let linked = false;
+  try { linked = await isNotifyChat(ctx.chat.id); } catch {}
+  if (!linked) return false;
+
+  const answer = String(text || msg.caption || "").trim();
+  if (!answer) { await ctx.reply("اكتب نص الإجابة في ردّك على تنبيه السؤال عشان أبعته للعميل."); return true; }
+  if (answer.length > 3500) { await ctx.reply("الإجابة طويلة؛ الحد الأقصى 3500 حرف."); return true; }
+
+  let question = null;
+  try { question = (await getQuestions()).find((x) => x.id === match[1]); } catch {}
+  if (!question?.chatId) { await ctx.reply("ملقتش السؤال ده في السجل؛ افتح لوحة التحكم للتأكد من حالته."); return true; }
+  if (!(["open", "followup_pending"].includes(question.status || "open"))) {
+    await ctx.reply("السؤال ده اترد عليه أو اتقفل بالفعل؛ افتح لوحة التحكم لو محتاج تراجع حالته.");
+    return true;
+  }
+
+  const followupCount = Array.isArray(question.followups) ? question.followups.length : 0;
+  const extra = await getExtraFollowups(question.chatId).catch(() => 0);
+  const limit = limitForItem(question, extra);
+  const finalAnswer = followupCount >= limit;
+  const configuredFooter = messages.answerFooter || `\n\n📌 مسموح بحد أقصى ${limit} متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك».`;
+  const answerFooter = configuredFooter.replace(/حد أقصى 3 متابعات/g, `حد أقصى ${limit} متابعات`);
+  const footer = finalAnswer ? "" : (followupCount > 0
+    ? `\n\n📩 المتابعة: ${followupCount}/${limit}`
+    : answerFooter);
+  const replyMarkup = finalAnswer ? undefined : {
+    force_reply: true,
+    input_field_placeholder: String(messages.followupPlaceholder || "اكتب متابعة السؤال هنا...").slice(0, 64),
+  };
+  let sent;
+  try {
+    sent = await ctx.api.sendMessage(question.chatId, `📩 رد على سؤالك:\n\n${answer}${footer}`, replyMarkup ? { reply_markup: replyMarkup } : {});
+  } catch (e) {
+    console.error("[group-answer] Telegram send failed:", e?.description || e?.message);
+    await ctx.reply("ماقدرتش أوصل الرد للعميل. جرّب تاني من فضلك.");
+    return true;
+  }
+
+  const updated = await answerQuestion(question.id, answer, sent.message_id).catch(() => null);
+  if (!updated) {
+    await ctx.reply("الرد اتبعت للعميل، لكن تعذر تحديث حالة السؤال في السجل بسبب مشكلة تخزين. ما تبعتش نفس الرد مرة تانية؛ راجع السؤال من اللوحة.");
+    return true;
+  }
+  if (updated.status === "archived") {
+    const closed = messages.manualClosed || "🔒 تم إغلاق هذا السؤال من الإدارة.\n\nإذا كان لديك استفسار جديد، استخدم زر «ابعت سؤالك» 👇";
+    await ctx.api.sendMessage(question.chatId, closed).catch(() => {});
+  }
+  await ctx.reply("تم إرسال الرد للعميل وتحديث حالة السؤال ✅");
+  return true;
+}
+
 // الرسايل النصية: طبي؟ ← رد على خانة السؤال؟ ← بحث بالكلمات ← رد عام
 async function handleMessageCore(ctx, text, msg) {
   try { if (await isBanned(ctx.chat.id)) return; } catch {}
@@ -497,6 +558,8 @@ async function handleMessageCore(ctx, text, msg) {
   const m = content.messages || {};
   try { await notifyExpired(await maybeExpireQuestions(), m.autoClosed || DEFAULT_CLOSED_AUTO); } catch {}
   const root = (await renderFor(ctx, content, "")).markup;
+
+  if (["group", "supergroup"].includes(ctx.chat.type) && await handleStaffGroupAnswer(ctx, text, msg, m)) return;
 
   const repliedMessageId = msg.reply_to_message?.message_id;
   if (msg.reply_to_message?.from?.is_bot && repliedMessageId) {
@@ -509,9 +572,10 @@ async function handleMessageCore(ctx, text, msg) {
       if (followup?.limitReached) return ctx.reply(m.followupLimit || DEFAULT_FOLLOWUP_LIMIT, HTML_OPTS(root));
       if (followup) {
         const sent = await ctx.reply(m.followupReceived || DEFAULT_FOLLOWUP_RECEIVED, HTML_OPTS(root));
-        await notifyStaffSafe({ kind: "followup", n: (followup.followups || []).length, name: parent.customerName, text: followupText });
+        await notifyStaffSafe({ kind: "followup", questionId: parent.id, n: (followup.followups || []).length, name: parent.customerName, text: followupText });
         return sent;
       }
+      return ctx.reply("حصلت مشكلة مؤقتة في حفظ المتابعة، وما اتسجلتش. جرّب تبعتها تاني بعد شوية من فضلك 🙏", HTML_OPTS(root));
     }
   }
 
@@ -563,10 +627,7 @@ async function handleMessageCore(ctx, text, msg) {
   if (hits.length === 1) return showHit(ctx, hits[0]);
   if (hits.length > 1) return showChoices(ctx, hits, content, m, false);
 
-  try {
-    const words = distinctTokens(text).filter((w) => !/\d/.test(w));
-    if (words.length) await trackUnmatched(words);
-  } catch {}
+  // لا نسجل الكلمات غير المتطابقة؛ الإحصاء التفصيلي ده اختياري وكان يستهلك أوامر لكل رسالة.
   return ctx.reply(toHtml(m.fallback || DEFAULT_FALLBACK), HTML_OPTS(root));
 }
 

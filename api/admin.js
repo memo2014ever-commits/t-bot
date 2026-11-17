@@ -1,7 +1,7 @@
 // خادم لوحة التحكم: تسجيل دخول بدورين (أدمن / محرر)، وقراءة وحفظ وسجل نسخ من GitHub
 // كل الأسرار في متغيرات البيئة في Vercel، ومش ظاهرة للمتصفح
 import { timingSafeEqual, createHash } from "crypto";
-import { getStats, getStatsByDay, getOverviewDay, getQuestions, deleteQuestion, answerQuestion, updateAnswerHistory, closeExpiredQuestions, closeQuestion, getPressLog, getUnmatched, deleteUnmatched, clearUnmatched, banUser, unbanUser, getBans, getBanInfo, redis,
+import { getStats, getStatsByDay, getOverviewDay, getQuestions, getQuestionsAndCloseExpired, deleteQuestion, answerQuestion, updateAnswerHistory, closeQuestion, banUser, unbanUser, getBans, getBanInfo, redis,
   getIntake, setIntake, computeQuestionStats, DEFAULT_INTAKE_MESSAGE, MAX_FOLLOWUPS, MAX_EXTRA_PER_OPERATION, getExtraFollowups, getAllExtras, limitForItem, followupLimitState, adjustQuestionExtra, clearPermanentExtra, claimOperation, logLimitChange, getLimitLog } from "./stats.js";
 import { phonesSharedOnDay, phoneFeatureEnabled, phoneSharedCount, customerMap, listCustomers, customerDetail } from "./customers.js";
 import { explainError } from "./errors.js";
@@ -73,7 +73,9 @@ async function readCurrent(ref = GITHUB_BRANCH) {
 
 async function sendTelegram(chatId, answer, messages = {}, finalAnswer = false, followupCount = 0, imageUrl = null, limit = MAX_FOLLOWUPS) {
   if (!BOT_TOKEN) throw new Error("BOT_TOKEN غير مضبوط على السيرفر");
-  const text = `📩 رد على سؤالك:\n\n${answer}${finalAnswer ? "" : (followupCount > 0 ? `\n\n📩 المتابعة: ${followupCount}/${limit}` : (messages.answerFooter || `\n\n📌 مسموح بحد أقصى ${limit} متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك».`))}`;
+  const configuredFooter = messages.answerFooter || `\n\n📌 مسموح بحد أقصى ${limit} متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك».`;
+  const answerFooter = configuredFooter.replace(/حد أقصى 3 متابعات/g, `حد أقصى ${limit} متابعات`);
+  const text = `📩 رد على سؤالك:\n\n${answer}${finalAnswer ? "" : (followupCount > 0 ? `\n\n📩 المتابعة: ${followupCount}/${limit}` : answerFooter)}`;
   const replyMarkup = finalAnswer ? {} : { reply_markup: { force_reply: true, input_field_placeholder: messages.followupPlaceholder || "اكتب متابعة السؤال هنا..." } };
   let r, j;
   try {
@@ -155,14 +157,14 @@ export default async function handler(req, res) {
     }
 
     if (action === "questions") {
-      const expired = await closeExpiredQuestions();
+      const { questions, expired } = await getQuestionsAndCloseExpired();
       // نكلّم GitHub بس لو فيه أسئلة انتهت فعلاً (بدل كل تحديث): ده كان أكبر سبب لبطء الصفحة
       if (expired.length) {
         const systemMessages = (await readCurrent()).content.messages || {};
         await Promise.all(expired.map((x) => sendCloseNotice(x.chatId, true, systemMessages).catch(() => {})));
       }
       // extras: زيادات حد المتابعات لكل عميل (أمر Redis واحد)، والواجهة تحسب الحد = الافتراضي + الزيادة
-      const [questions, extras, intake] = await Promise.all([getQuestions(), getAllExtras().catch(() => ({})), getIntake()]);
+      const [extras, intake] = await Promise.all([getAllExtras().catch(() => ({})), getIntake()]);
       // بيانات أصحاب الأسئلة (3 أوامر Redis مهما كان العدد). رقم الهاتف للأدمن فقط
       const customers = await customerMap(questions.map((x) => x.chatId), { withPhones: role === "admin" }).catch(() => ({}));
       return res.json({ questions, customers, intake: { ...intake, defaultMessage: DEFAULT_INTAKE_MESSAGE }, phoneFeature: phoneFeatureEnabled(), extras, defaultFollowupLimit: MAX_FOLLOWUPS });
@@ -215,21 +217,6 @@ export default async function handler(req, res) {
     if (action === "delq") {
       if (typeof ref !== "string" || ref.length > 1000) return res.status(400).json({ error: "سؤال غلط" });
       await deleteQuestion(ref);
-      return res.json({ ok: true });
-    }
-
-    if (action === "unmatched") {
-      return res.json({ words: await getUnmatched() });
-    }
-
-    if (action === "delunmatched") {
-      if (typeof ref !== "string" || !ref.trim() || ref.length > 100) return res.status(400).json({ error: "كلمة غلط" });
-      await deleteUnmatched(ref);
-      return res.json({ ok: true });
-    }
-
-    if (action === "clearunmatched") {
-      await clearUnmatched();
       return res.json({ ok: true });
     }
 
@@ -396,10 +383,6 @@ export default async function handler(req, res) {
     if (action === "getBanInfo") {
       if (typeof ref !== "string" || !/^\d+$/.test(ref.trim())) return res.status(400).json({ error: "معرف العميل غير صحيح" });
       return res.json({ ban: await getBanInfo(ref.trim()) });
-    }
-
-    if (action === "presslog") {
-      return res.json({ log: await getPressLog() });
     }
 
     if (action === "history") {

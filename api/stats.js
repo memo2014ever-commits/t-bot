@@ -1,4 +1,4 @@
-// الإحصائيات والأسئلة وسجل الضغطات في Upstash Redis (REST). أي فشل ما يوقفش البوت
+// الإحصائيات المجمعة والأسئلة في Upstash Redis (REST). أي فشل اختياري ما يوقفش البوت
 import { createHash, randomUUID } from "crypto";
 
 const URL_R = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
@@ -15,6 +15,12 @@ export const cairoDayOf = (ts) => new Date(Number(ts)).toLocaleDateString("en-CA
 let lastRedisError = null;
 export const getLastRedisError = () => lastRedisError;
 let lastRedisLogAt = 0;
+let optionalPauseUntil = 0;
+const OPTIONAL_KEY_PREFIXES = ["stats:", "active:day:", "subs:", "cu:", "pl:"];
+function isOptionalCommand(cmd) {
+  const key = String(cmd?.[1] ?? "");
+  return OPTIONAL_KEY_PREFIXES.some((prefix) => key.startsWith(prefix)) || key === "intake_log";
+}
 function noteRedisError(msg) {
   const clean = String(msg).replace(/bot\d+:[A-Za-z0-9_-]+/g, "bot***").slice(0, 200);
   lastRedisError = { t: Date.now(), msg: clean };
@@ -22,6 +28,7 @@ function noteRedisError(msg) {
 }
 export async function redis(cmd) {
   if (!URL_R || !TOKEN_R) return null;
+  if (Date.now() < optionalPauseUntil && isOptionalCommand(cmd)) return null;
   let r;
   try {
     r = await fetch(URL_R, {
@@ -31,26 +38,41 @@ export async function redis(cmd) {
     });
   } catch (e) { noteRedisError("تعذّر الاتصال بـ Redis: " + (e?.message || e)); throw e; }
   const j = await r.json();
-  if (j && j.error) noteRedisError(j.error);   // مثلاً: تجاوز حد Upstash أو توكن غلط (بيرجّع null زي الأول)
+  if (j && j.error) {
+    noteRedisError(j.error);   // مثلاً: تجاوز حد Upstash أو توكن غلط (بيرجّع null زي الأول)
+    if (/limit|quota|exceed/i.test(String(j.error))) optionalPauseUntil = Date.now() + 5 * 60 * 1000;
+  }
   return j.result ?? null;
 }
 
+// كاش محلي يمنع تكرار أوامر HyperLogLog لنفس العميل في اليوم على نفس النسخة.
+const visitorSeenToday = new Set();
+const activeSeenToday = new Set();
+function cacheKey(chatId) { return `${todayKey()}:${String(chatId)}`; }
+function trimSeen(set) { if (set.size > 20000) set.clear(); }
+
 // عميل جديد (/start)
-// (مصدر المستخدم src:* اتشال: مكنش بيفيد، وده كمان بيوفر أمر Redis في كل /start)
 export async function trackVisitor(chatId) {
   const id = String(chatId);
+  const ck = cacheKey(id);
+  if (visitorSeenToday.has(ck)) return;
   const isNew = await redis(["PFADD", "subs:all", id]);
+  if (isNew === null) return;
   await redis(["PFADD", `active:day:${todayKey()}`, id]);
   await redis(["PFADD", `subs:day:${todayKey()}`, id]);
   if (isNew === 1) await redis(["PFADD", `subs:new:day:${todayKey()}`, id]);
+  visitorSeenToday.add(ck); trimSeen(visitorSeenToday);
 }
 
 // أي تفاعل فعلي مع البوت يجعل المستخدم نشطًا في هذا اليوم.
 export async function trackActive(chatId) {
-  await redis(["PFADD", `active:day:${todayKey()}`, String(chatId)]);
+  const ck = cacheKey(chatId);
+  if (activeSeenToday.has(ck)) return;
+  const r = await redis(["PFADD", `active:day:${todayKey()}`, String(chatId)]);
+  if (r !== null) { activeSeenToday.add(ck); trimSeen(activeSeenToday); }
 }
 
-// الضغطة تحفظ في عداد إجمالي، وعداد يومي، وسجل تاريخي غير محدود.
+// نحافظ على الإحصائيات المجمعة حسب الزر والساعة، من دون سجل ضغطات فردي.
 function hourNow() {
   const h = new Intl.DateTimeFormat("en-US", { timeZone: "Africa/Cairo", hour: "numeric", hourCycle: "h23" }).format(new Date());
   return String(Number(h));
@@ -62,24 +84,8 @@ export async function trackPress(path, label) {
   await Promise.all([
     redis(["HINCRBY", `stats:hours:${d}`, h, 1]),
     redis(["HINCRBY", `stats:press:${d}`, `${path}|${label || ""}`, 1]),
-    redis(["LPUSH", "presslog", JSON.stringify({ t: Date.now(), p: path, l: label || "" })]),
   ]);
-  // سجل الضغطات بيتقص تقريباً كل 20 ضغطة (يوفر أوامر، ويمنع الكبر بلا حد)
-  if (Math.random() < 0.05) await redis(["LTRIM", "presslog", 0, 499]);
 }
-
-export async function trackUnmatched(words) {
-  for (const w of words.slice(0, 3)) await redis(["HINCRBY", "unmatched", w, 1]);
-}
-
-export async function getUnmatched() {
-  const arr = (await redis(["HGETALL", "unmatched"])) || [];
-  const o = toObj(arr);
-  return Object.entries(o).map(([word, count]) => ({ word, count })).sort((a, b) => b.count - a.count).slice(0, 50);
-}
-
-export async function deleteUnmatched(word) { await redis(["HDEL", "unmatched", word]); }
-export async function clearUnmatched() { await redis(["DEL", "unmatched"]); }
 
 // سؤال معلّق لمدة 10 دقايق لحد ما العميل يختار من "تقصد؟" أو يأكد إنه يبعته
 function pendKey(chatId) {
@@ -108,9 +114,14 @@ export async function takePendingImage(chatId) {
   if (v) await redis(["DEL", k]);
   return v;
 }
+let nextLocalExpiryCheck = 0;
 export async function maybeExpireQuestions(now = Date.now()) {
-  const ok = await redis(["SET", "expiry:lock", "1", "NX", "EX", 3600]);
+  if (now < nextLocalExpiryCheck) return [];
+  nextLocalExpiryCheck = now + 5 * 60 * 1000;
+  let ok = null;
+  try { ok = await redis(["SET", "expiry:lock", "1", "NX", "EX", 600]); } catch { return []; }
   if (ok !== "OK") return [];
+  nextLocalExpiryCheck = now + 10 * 60 * 1000;
   return closeExpiredQuestions(now);
 }
 
@@ -132,14 +143,19 @@ export async function setIntake(enabled, message, by) {
   return true;
 }
 
-export async function pushQuestion(text, chatId, customerName = "", attachments = [], username = "") {
-  // تحقق نهائي في نفس دالة إنشاء السؤال: مهما كان مصدر الاستدعاء، السؤال الجديد ما بيتسجلش والاستقبال متوقف
-  if (!(await getIntake()).enabled) return { ok: false, reason: "intake_paused" };
-  await redis(["LPUSH", "questions", JSON.stringify({
+export async function pushQuestion(text, chatId, customerName = "", attachments = [], username = "", intakeChecked = false) {
+  // استدعاء webhook يمرر نتيجة فحص الاستقبال لتجنب قراءة الإعداد مرتين.
+  if (!intakeChecked) {
+    const intake = await getIntake();
+    if (!intake.enabled) return { ok: false, reason: "intake_paused", message: intake.message };
+  }
+  const question = {
     id: randomUUID(), t: Date.now(), q: String(text).slice(0, 500), chatId: String(chatId), customerName: String(customerName).slice(0, 150), username: String(username || "").slice(0, 64), status: "open",
     attachments: Array.isArray(attachments) ? attachments.slice(0, 5) : [],
-  })]);
-  return { ok: true };
+  };
+  const saved = await redis(["LPUSH", "questions", JSON.stringify(question)]);
+  if (saved === null) return { ok: false, reason: "save_failed" };
+  return { ok: true, question };
 }
 
 const MAX_QUESTIONS = 3;
@@ -151,8 +167,9 @@ export async function questionsLeft(chatId) {
 }
 export async function questionAllowed(chatId) {
   const key = qKey(chatId), n = await redis(["INCR", key]);
-  if (n === 1) await redis(["EXPIRE", key, WINDOW_SECONDS]);
-  return (n ?? 0) <= MAX_QUESTIONS;
+  if (n === null) return null;
+  if (n === 1 && (await redis(["EXPIRE", key, WINDOW_SECONDS])) === null) return null;
+  return { allowed: n <= MAX_QUESTIONS, left: Math.max(0, MAX_QUESTIONS - n) };
 }
 export const MAX_QUESTIONS_COUNT = MAX_QUESTIONS;
 
@@ -192,7 +209,7 @@ export function computeQuestionStats(list) {
 export async function deleteQuestion(raw) { await redis(["LREM", "questions", 1, raw]); }
 
 export const FOLLOWUP_WINDOW_MS = 24 * 60 * 60 * 1000;
-export const MAX_FOLLOWUPS = 3;
+export const MAX_FOLLOWUPS = 10;
 
 // ==================== سجل العميل وحد المتابعات الإضافي ====================
 // الزيادة مرتبطة بمعرف تيليجرام للعميل (حقل داخل hash باسم fu:extra)، والحد الافتراضي MAX_FOLLOWUPS لا يتغير.
@@ -214,7 +231,7 @@ export async function getAllExtras() {
 export const followupLimitFor = (extra = 0) => MAX_FOLLOWUPS + Math.max(0, Number(extra) || 0);
 
 // ---- حد المتابعات لكل سؤال ----
-// الحد الفعلي للسؤال = 3 (الافتراضي) + extraFollowups المخزنة على السؤال نفسه (بتنتهي بانتهاء السؤال)
+// الحد الفعلي للسؤال = 10 (الافتراضي) + extraFollowups المخزنة على السؤال نفسه (بتنتهي بانتهاء السؤال)
 //                    + الإضافي الدائم القديم للعميل (fu:extra، بيتحذف من نافذة الحد، ومبيتضافش عليه تاني).
 export const limitForItem = (item, permanent = 0) =>
   MAX_FOLLOWUPS + Math.max(0, Number(permanent) || 0) + Math.max(0, Number(item?.extraFollowups) || 0);
@@ -301,20 +318,31 @@ export async function getLimitLog(chatId = null) {
 }
 
 
-export async function closeExpiredQuestions(now = Date.now()) {
-  const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
+export async function closeExpiredQuestions(now = Date.now(), rawOverride = null) {
+  const raw = rawOverride || (await redis(["LRANGE", "questions", 0, -1])) || [];
   const closed = [];
   for (let i = 0; i < raw.length; i++) {
     try {
       const item = JSON.parse(raw[i]);
       if (item.status === "awaiting_followup" && item.followupUntil && item.followupUntil <= now) {
         const updated = { ...item, status: "archived", closedAt: now, closeReason: "timeout" };
-        await redis(["LSET", "questions", i, JSON.stringify(updated)]);
-        closed.push({ ...updated, raw: JSON.stringify(updated) });
+        const encoded = JSON.stringify(updated);
+        const saved = await redis(["LSET", "questions", i, encoded]);
+        if (saved !== null) {
+          raw[i] = encoded;
+          closed.push({ ...updated, raw: encoded });
+        }
       }
     } catch {}
   }
   return closed;
+}
+
+// لوحة الأسئلة تحتاج القائمة نفسها؛ نقرأها مرة واحدة ونغلق المنتهية ضمن نفس المرور.
+export async function getQuestionsAndCloseExpired(now = Date.now()) {
+  const raw = (await redis(["LRANGE", "questions", 0, -1])) || [];
+  const expired = await closeExpiredQuestions(now, raw);
+  return { questions: raw.map((r) => ({ raw: r, ...JSON.parse(r) })), expired };
 }
 
 export async function closeQuestion(ref, reason = "manual") {
@@ -422,12 +450,6 @@ export async function updateAnswerHistory(ref, historyIndex, answer, telegramMes
   return result === null ? null : { ...updated, raw: JSON.stringify(updated) };
 }
 
-// لا يوجد قص للسجل؛ يعرض كل السجل التاريخي المتاح.
-export async function getPressLog() {
-  const raw = (await redis(["LRANGE", "presslog", 0, 499])) || [];
-  return raw.map((r) => JSON.parse(r));
-}
-
 async function hoursForDate(date) { return toObj((await redis(["HGETALL", `stats:hours:${date}`])) || []); }
 function peakHour(hours) {
   const entries = Object.entries(hours).map(([h, n]) => [Number(h), Number(n)]).filter(([, n]) => n > 0);
@@ -492,18 +514,32 @@ function banKey(chatId) {
 
 export async function banUser(chatId, reason, bannedBy) {
   const key = banKey(chatId);
-  await redis(["HSET", key, "chatId", String(chatId), "reason", String(reason).slice(0, 300), "bannedAt", Date.now(), "bannedBy", String(bannedBy).slice(0, 50)]);
+  const saved = await redis(["HSET", key, "chatId", String(chatId), "reason", String(reason).slice(0, 300), "bannedAt", Date.now(), "bannedBy", String(bannedBy).slice(0, 50)]);
   await redis(["SADD", "bans:set", String(chatId)]);
+  if (saved !== null) { banCache.add(String(chatId)); banCacheLoaded = true; banCacheAt = Date.now(); }
 }
 
 export async function unbanUser(chatId) {
   await redis(["DEL", banKey(chatId)]);
-  await redis(["SREM", "bans:set", String(chatId)]);
+  const removed = await redis(["SREM", "bans:set", String(chatId)]);
+  if (removed !== null) { banCache.delete(String(chatId)); banCacheLoaded = true; banCacheAt = Date.now(); }
 }
 
+const BAN_CACHE_MS = 60 * 1000;
+let banCache = new Set();
+let banCacheAt = 0;
+let banCacheLoaded = false;
 export async function isBanned(chatId) {
-  const v = await redis(["HGET", banKey(chatId), "bannedAt"]);
-  return v !== null;
+  const now = Date.now();
+  if (!banCacheLoaded || now - banCacheAt >= BAN_CACHE_MS) {
+    const ids = await redis(["SMEMBERS", "bans:set"]);
+    if (Array.isArray(ids)) {
+      banCache = new Set(ids.map(String));
+      banCacheAt = now;
+      banCacheLoaded = true;
+    }
+  }
+  return banCache.has(String(chatId));
 }
 
 export async function getBanInfo(chatId) {

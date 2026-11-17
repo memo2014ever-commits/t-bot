@@ -27,7 +27,7 @@ export async function getNotifyConfig() {
   return {
     enabled: bool(o.enabled, NOTIFY_DEFAULTS.enabled), onQuestion: bool(o.onQuestion, NOTIFY_DEFAULTS.onQuestion),
     onFollowup: bool(o.onFollowup, NOTIFY_DEFAULTS.onFollowup), showName: bool(o.showName, NOTIFY_DEFAULTS.showName),
-    previewChars: n(o.previewChars, NOTIFY_DEFAULTS.previewChars, 0, 300), maxPerMinute: n(o.maxPerMinute, NOTIFY_DEFAULTS.maxPerMinute, 1, 30),
+    previewChars: n(o.previewChars, NOTIFY_DEFAULTS.previewChars, 0, 1000), maxPerMinute: n(o.maxPerMinute, NOTIFY_DEFAULTS.maxPerMinute, 1, 30),
     panelUrl: /^https:\/\/\S{1,200}$/.test(o.panelUrl || "") ? o.panelUrl : "",
   };
 }
@@ -41,7 +41,7 @@ export async function setNotifyConfig(patch) {
     args.push(k, patch[k] ? "1" : "0");
   }
   if (patch.previewChars !== undefined) {
-    if (!Number.isInteger(patch.previewChars) || patch.previewChars < 0 || patch.previewChars > 300) return { error: "عدد الحروف من 0 إلى 300" };
+    if (!Number.isInteger(patch.previewChars) || patch.previewChars < 0 || patch.previewChars > 1000) return { error: "عدد الحروف من 0 إلى 1000" };
     args.push("previewChars", String(patch.previewChars));
   }
   if (patch.maxPerMinute !== undefined) {
@@ -61,6 +61,9 @@ export async function setNotifyConfig(patch) {
 export async function listNotifyChats() {
   const o = toObj((await redis(["HGETALL", CHATS])) || []);
   return Object.entries(o).map(([chatId, v]) => ({ chatId, ...(parse(v) || {}) })).sort((a, b) => (a.linkedAt || 0) - (b.linkedAt || 0));
+}
+export async function isNotifyChat(chatId) {
+  return (await redis(["HEXISTS", CHATS, String(chatId)])) === 1;
 }
 export async function unlinkNotifyChat(chatId) {
   return (await redis(["HDEL", CHATS, String(chatId)])) === 1;
@@ -120,7 +123,8 @@ export function buildText(ev, cfg) {
     const chars = Array.from(flat);
     preview = `\n«${esc(chars.slice(0, cfg.previewChars).join(""))}${chars.length > cfg.previewChars ? "…" : ""}»`;
   }
-  return `${title}${name}${preview}`;
+  const questionRef = /^[a-f0-9-]{36}$/i.test(String(ev.questionId || "")) ? `\n\n<code>QID:${esc(ev.questionId)}</code>` : "";
+  return `${title}${name}${preview}${questionRef}`;
 }
 const markupFor = (cfg) => (cfg.panelUrl ? { inline_keyboard: [[{ text: "فتح اللوحة", url: cfg.panelUrl }]] } : undefined);
 

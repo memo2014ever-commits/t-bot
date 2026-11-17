@@ -23,6 +23,11 @@ function loadKey() {
 }
 // الميزة كلها بتشتغل بس لو المفتاح موجود وصحيح (32 بايت). غير كده: مفيش طلب رقم ولا تخزين.
 export const phoneFeatureEnabled = () => loadKey() !== null;
+const PHONE_CACHE_MS = 60 * 1000;
+const phoneDueCache = new Map();
+const phoneExistsCache = new Map();
+function trimPhoneCache(cache) { if (cache.size > 20000) cache.clear(); }
+function invalidatePhoneCache(id) { phoneDueCache.delete(String(id)); phoneExistsCache.delete(String(id)); }
 
 export function encryptPhone(chatId, phone) {
   const key = loadKey();
@@ -89,6 +94,15 @@ const enc = (state, count, last, start) => `${state}|${count}|${last}|${start}`;
 export async function phonePromptDue(chatId, now = Date.now()) {
   if (!validId(chatId)) return false;
   const id = String(chatId);
+  const cachedUntil = phoneDueCache.get(id) || 0;
+  if (cachedUntil > now) return false;
+  const due = await phonePromptDueUncached(id, now);
+  if (!due) { phoneDueCache.set(id, now + PHONE_CACHE_MS); trimPhoneCache(phoneDueCache); }
+  else phoneDueCache.delete(id);
+  return due;
+}
+
+async function phonePromptDueUncached(id, now) {
   const cur = parseState(await redis(["HGET", PHS, id]));
   // أول ظهور: HSETNX ذري (يرجع 1 لطلب واحد بس حتى لو جت رسايل كتير مع بعض)
   if (!cur) return (await redis(["HSETNX", PHS, id, enc("phone_prompted", 1, now, now)])) === 1;
@@ -107,18 +121,25 @@ export async function phonePromptDue(chatId, now = Date.now()) {
 // ضغط زرار القايمة الرئيسية: يتسجل إن الطلب اتعرض (من غير ما يلغي أي جدول موجود)
 export async function claimPhonePrompt(chatId, now = Date.now()) {
   if (!validId(chatId)) return false;
+  invalidatePhoneCache(chatId);
   return (await redis(["HSETNX", PHS, String(chatId), enc("phone_prompted", 1, now, now)])) === 1;
 }
 
 export async function hasPhone(chatId) {
   if (!validId(chatId)) return false;
-  return (await redis(["HEXISTS", PH, String(chatId)])) === 1;
+  const id = String(chatId), cached = phoneExistsCache.get(id);
+  if (cached && cached.until > Date.now()) return cached.value;
+  const value = (await redis(["HEXISTS", PH, id])) === 1;
+  phoneExistsCache.set(id, { value, until: Date.now() + PHONE_CACHE_MS });
+  trimPhoneCache(phoneExistsCache);
+  return value;
 }
 
 // بيحفظ الرقم مشفّر. بيرجع true بس لو الكتابة نجحت فعلاً
 export async function savePhone(from, phone) {
   if (!from || !validId(from.id)) return false;
   const id = String(from.id);
+  invalidatePhoneCache(id);
   const blob = encryptPhone(id, phone);
   if ((await redis(["HSET", PH, id, blob])) === null) return false;
   if ((await redis(["HSET", PHS, id, "phone_shared"])) === null) return false;
@@ -130,6 +151,7 @@ export async function savePhone(from, phone) {
 export async function skipPhone(from) {
   if (!from || !validId(from.id)) return false;
   const id = String(from.id);
+  invalidatePhoneCache(id);
   if (await hasPhone(id)) return true;
   const now = Date.now(), cur = parseState(await redis(["HGET", PHS, id]));
   // ضغطة "بدون مشاركة": بداية دورة التذكير كل 3 أيام (ولو كان متخطي قبل كده نحتفظ ببداية الدورة)
