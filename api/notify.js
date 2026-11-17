@@ -123,7 +123,8 @@ export function buildText(ev, cfg) {
     const chars = Array.from(flat);
     preview = `\n«${esc(chars.slice(0, cfg.previewChars).join(""))}${chars.length > cfg.previewChars ? "…" : ""}»`;
   }
-  const questionRef = /^[a-f0-9-]{36}$/i.test(String(ev.questionId || "")) ? `\n\n<tg-spoiler>QID:${esc(ev.questionId)}</tg-spoiler>` : "";
+  // مرجع داخلي غير مرئي؛ يُقرأ من MessageEntity عند الرد على التنبيه، دون كتابة إضافية في Redis.
+  const questionRef = /^[a-f0-9-]{36}$/i.test(String(ev.questionId || "")) ? `<a href="https://qref.invalid/${ev.questionId}">&#8291;</a>` : "";
   return `${title}${name}${preview}${questionRef}`;
 }
 const markupFor = (cfg) => (cfg.panelUrl ? { inline_keyboard: [[{ text: "فتح اللوحة", url: cfg.panelUrl }]] } : undefined);

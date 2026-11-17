@@ -497,8 +497,13 @@ async function handleStaffGroupAnswer(ctx, text, msg, messages = {}) {
   const reply = msg.reply_to_message;
   if (!reply?.from?.is_bot) return false;
   const original = String(reply.text || reply.caption || "");
-  const match = original.match(/\bQID:([a-f0-9-]{36})\b/i);
-  if (!match) return false;
+  const visibleRef = original.match(/\bQID:([a-f0-9-]{36})\b/i);
+  const hiddenEntity = (Array.isArray(reply.entities) ? reply.entities : []).find((e) =>
+    e.type === "text_link" && /^https:\/\/qref\.invalid\/([a-f0-9-]{36})$/i.test(String(e.url || ""))
+  );
+  const hiddenRef = hiddenEntity?.url?.match(/^https:\/\/qref\.invalid\/([a-f0-9-]{36})$/i);
+  const questionId = visibleRef?.[1] || hiddenRef?.[1];
+  if (!questionId) return false;
   let linked = false;
   try { linked = await isNotifyChat(ctx.chat.id); } catch {}
   if (!linked) return false;
@@ -508,7 +513,7 @@ async function handleStaffGroupAnswer(ctx, text, msg, messages = {}) {
   if (answer.length > 3500) { await ctx.reply("الإجابة طويلة؛ الحد الأقصى 3500 حرف."); return true; }
 
   let question = null;
-  try { question = (await getQuestions()).find((x) => x.id === match[1]); } catch {}
+  try { question = (await getQuestions()).find((x) => x.id === questionId); } catch {}
   if (!question?.chatId) { await ctx.reply("ملقتش السؤال ده في السجل؛ افتح لوحة التحكم للتأكد من حالته."); return true; }
   if (!(["open", "followup_pending"].includes(question.status || "open"))) {
     await ctx.reply("السؤال ده اترد عليه أو اتقفل بالفعل؛ افتح لوحة التحكم لو محتاج تراجع حالته.");
