@@ -176,7 +176,6 @@
       <button class="tab" data-tab="menu" onclick="showTab('menu')">🧭 القوايم والأزرار</button>
       <button class="tab" data-tab="questions" onclick="showTab('questions')">💬 الأسئلة</button>
       <button class="tab" data-tab="archive" onclick="showTab('archive')">🗄️ الأرشيف</button>
-      <button class="tab" data-tab="presslog" onclick="showTab('presslog')">🧾 سجل الضغطات</button>
       <button class="tab" data-tab="history" onclick="showTab('history')">🕘 النسخ السابقة</button>
       <button class="tab" data-tab="bans" onclick="showTab('bans')">🚫 المحظورون</button>
     </nav>
@@ -259,20 +258,6 @@
       </div>
       <div class="card" style="padding:0;overflow:auto"><table id="aTable" class="q-archive-table"></table></div>
       <p class="muted">يمكنك التصفية حسب تاريخ السؤال. الإجابة ووقت إرسالها محفوظان مع كل سجل.</p>
-    </div>
-
-    <!-- سجل الضغطات -->
-    <div id="tab-presslog" class="hidden">
-      <div class="row" style="margin-bottom:12px">
-        <h2 style="margin:0">سجل الضغطات</h2>
-        <div class="row" style="gap:6px">
-          <button class="ghost" onclick="loadPressLog()">🔄 تحديث</button>
-          <button class="ghost" onclick="exportPressLog()">📥 تصدير Excel</button>
-        </div>
-      </div>
-      <div class="toolbar"><input id="pSearch" placeholder="🔍 ابحث باسم الزرار..." oninput="renderPressLog()"><label class="muted">اليوم: <input id="pDate" type="date" onchange="renderPressLog()" style="width:auto"></label><button class="ghost" onclick="clearPressDate()">كل الأيام</button></div>
-      <div class="card" style="padding:0;overflow:auto"><table id="pTable"></table></div>
-      <p class="muted">السجل التاريخي الكامل المتاح، والوقت بتوقيت القاهرة. استخدم تقويم هذا القسم لتصفية يوم محدد.</p>
     </div>
 
     <!-- النسخ السابقة -->
@@ -444,13 +429,12 @@ function dropDraft() {
 // ---------- التنقل ----------
 function showTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  ["stats", "menu", "questions", "archive", "presslog", "history", "bans"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
+  ["stats", "menu", "questions", "archive", "history", "bans"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
   if (name === "stats") loadStats();
   if (name === "questions" || name === "archive") {
     if (questionsCache.length) { renderQuestions(); renderArchive(); }   // نعرض اللي عندنا فوراً، وبعدين نحدّث
     loadQuestions();
   }
-  if (name === "presslog") loadPressLog();
   if (name === "history") loadHistory();
   if (name === "bans") loadBans();
 }
@@ -529,16 +513,17 @@ function openSystemMessages() {
     ["💬 الأسئلة", "بتتعلق بزرار ابعت سؤالك", [
       ["askPrompt", "📝 الرسالة لما العميل يدوس زرار السؤال", "بتظهر ومعاها خانة الكتابة", "اكتب سؤالك هنا 👇"],
       ["askThanks", "✅ الرسالة بعد ما السؤال يتسجل", "بتظهر بعد ما العميل يبعت سؤاله", "استلمنا سؤالك، شكراً لتواصلك 🌷"],
+      ["questionSaveError", "⚠️ رسالة فشل حفظ السؤال", "تظهر لو تعذر تسجيل السؤال؛ لا تظهر رسالة الاستلام إلا بعد نجاح الحفظ", "حصلت مشكلة مؤقتة في حفظ سؤالك، وما اتسجلش عندنا. جرّب تبعته تاني بعد شوية من فضلك 🙏"],
       ["remaining", "🔢 الجملة اللي بتتكتب بعد الشكر (اكتب {left} للرقم)", "بتوضح عدد الأسئلة الباقية", "(باقي لك {left} أسئلة خلال 24 ساعة)"],
       ["limitReached", "🚫 لما العميل يخلص أسئلته (اكتب {max} للحد)", "بتظهر لما يوصل للحد اليومي", "استنفدت عدد الأسئلة المسموحة ({max}) خلال 24 ساعة 🙏"],
     ]],
     ["🔁 متابعة السؤال والإغلاق", "تتحكم في الرسائل التي تظهر بعد الرد أو عند إغلاق السؤال", [
-      ["answerFooter", "📌 النص أسفل كل إجابة من الإدارة", "يظهر لتوضيح Reply للسؤال نفسه وزر السؤال الجديد؛ اتركه فارغًا للافتراضي", "\n\n📌 مسموح بحد أقصى 3 متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك»."],
+      ["answerFooter", "📌 النص أسفل كل إجابة من الإدارة", "يظهر لتوضيح Reply للسؤال نفسه وزر السؤال الجديد؛ اتركه فارغًا للافتراضي", "\n\n📌 مسموح بحد أقصى 10 متابعات على نفس السؤال. اضغط Reply للمتابعة، ولسؤال جديد استخدم «ابعت سؤالك»."],
       ["finalAnswerFooter", "🔒 النص أسفل الرد النهائي", "يظهر بعد الرد على آخر متابعة عند إغلاق السؤال", "\n\n🔒 تم إغلاق السؤال. لأي سؤال جديد استخدم زر «ابعت سؤالك»."],
       ["followupPlaceholder", "✍️ النص داخل خانة Reply", "يظهر في خانة الكتابة عند الرد على إجابة الإدارة", "اكتب متابعة السؤال هنا..."],
       ["followupLimitIncreased", "🎁 رسالة زيادة حد المتابعات", "تظهر للعميل بعد نجاح زيادة حد متابعاته من اللوحة", "🎁 تمت زيادة عدد المتابعات المسموح لك بها 🌷\nتقدر دلوقتي تكمل متابعة استفسارك بالرد (Reply) على آخر رد وصلك من الإدارة."],
       ["followupReceived", "✅ رسالة استلام المتابعة", "تظهر بعد Reply صحيح على إجابة ما زالت مفتوحة", "تم استلام المتابعة على نفس السؤال ✅\nسيتم الرد عليك هنا."],
-      ["followupLimit", "🚫 رسالة انتهاء المتابعات", "تظهر بعد تجاوز 3 متابعات لنفس السؤال", "تم الوصول للحد الأقصى للمتابعات على هذا السؤال. لو عندك استفسار جديد، استخدم زر «ابعت سؤالك» 👇"],
+      ["followupLimit", "🚫 رسالة انتهاء المتابعات", "تظهر بعد الوصول للحد الأقصى (10 افتراضيًا) لنفس السؤال", "تم الوصول للحد الأقصى للمتابعات على هذا السؤال. لو عندك استفسار جديد، استخدم زر «ابعت سؤالك» 👇"],
       ["autoClosed", "⏱ رسالة الإغلاق التلقائي", "تظهر بعد 24 ساعة بدون متابعة", "🔒 تم إغلاق سؤالك تلقائيًا لعدم وجود متابعة خلال 24 ساعة.\n\nإذا كان لديك استفسار جديد، استخدم زر «ابعت سؤالك» 👇"],
       ["manualClosed", "🔒 رسالة الإغلاق اليدوي", "تظهر عند ضغط الإدارة على إغلاق السؤال", "🔒 تم إغلاق هذا السؤال من الإدارة.\n\nإذا كان لديك استفسار جديد، استخدم زر «ابعت سؤالك» 👇"],
     ]],
@@ -1010,13 +995,8 @@ function statLabel(key) {
 }
 
 let lastStats = null;
-let lastUnmatched = [];
 let lastHoursView = {};
 let lastHoursDate = "";
-
-function exportUnmatched() {
-  csvDownload(`الكلمات_غير_المتطابقة_${today()}.csv`, [["الكلمة", "عدد مرات الكتابة"], ...lastUnmatched.map((w) => [w.word, w.count])]);
-}
 
 function exportHours() {
   const hrs = lastHoursView || {};
@@ -1038,11 +1018,6 @@ function labelUsage(obj) {
 
 function currentUsed(st) {
   return labelUsage(st.pressByPath7d);
-}
-
-function unusedNodes(st) {
-  const usedNames = Object.keys(currentUsed(st));
-  return allNodes().filter(({ path, node }) => path !== "" && !usedNames.includes(node.label));
 }
 
 function csvDownload(fileName, rows) {
@@ -1077,13 +1052,8 @@ function buttonRows(st) {
     .sort((a, b) => b[1] - a[1])
     .map(([k, v]) => [k.split("|")[1], v])];
 }
-function unusedRows(st) {
-  return [["زرار ما اتداسش خلال 7 أيام"], ...unusedNodes(st).map(({ node }) => [node.label || "بدون اسم"])];
-}
-
 function exportDaily() { if (lastStats) csvDownload(`يومي_${today()}.csv`, dailyRows(lastStats)); }
 function exportButtons() { if (lastStats) csvDownload(`الزراير_${today()}.csv`, buttonRows(lastStats)); }
-function exportUnused() { if (lastStats) csvDownload(`غير_مستخدم_${today()}.csv`, unusedRows(lastStats)); }
 
 function exportAll() {
   if (!lastStats) return;
@@ -1158,7 +1128,7 @@ function setQuestionsData(r) {
   customersCache = r.customers || {}; questionsCache = r.questions;
   custIdx = {};
   for (const x of r.questions) { const e = (custIdx[String(x.chatId)] ||= { n: 0, first: Infinity }); e.n++; if (x.t < e.first) e.first = x.t; }
-  if (r.intake) intakeState = r.intake; extrasCache = r.extras || {}; defaultFuLimit = r.defaultFollowupLimit || 3; updateQuestionCards(); }
+  if (r.intake) intakeState = r.intake; extrasCache = r.extras || {}; defaultFuLimit = r.defaultFollowupLimit || 10; updateQuestionCards(); }
 function normQ(q) { return q.trim().replace(/\s+/g, " ").toLowerCase(); }
 function customerQuestions(chatId) {
   return chatId ? questionsCache.filter((x) => x.chatId === chatId) : [];
@@ -1387,18 +1357,40 @@ function updateBell() {
 }
 function openQuestionsFromBell() { showTab("questions"); }
 
-// ---------- التحديث التلقائي للأسئلة (كل دقيقة وانت فاتح اللوحة) ----------
+// ---------- التحديث التلقائي للأسئلة: كل دقيقة، ويتوقف بعد 5 دقائق خمول ----------
 let autoTimer = null;
+const AUTO_REFRESH_MS = 60 * 1000;
+const DASHBOARD_IDLE_MS = 5 * 60 * 1000;
+let lastDashboardActivity = Date.now();
 function startAutoRefresh() {
   if (autoTimer) clearInterval(autoTimer);
-  autoTimer = setInterval(refreshQuestionsSilently, 30000);
+  lastDashboardActivity = Date.now();
+  autoTimer = setInterval(() => {
+    if (!creds || document.hidden || Date.now() - lastDashboardActivity >= DASHBOARD_IDLE_MS) {
+      clearInterval(autoTimer); autoTimer = null; return;
+    }
+    refreshQuestionsSilently();
+  }, AUTO_REFRESH_MS);
 }
 // أول ما ترجع للتاب (بعد ما كان في الخلفية) نحدّث فوراً، لأن المتصفح بيوقف المؤقتات في التابات المخفية
 let lastQRefresh = 0;
-function refreshOnReturn() { if (creds && !document.hidden && Date.now() - lastQRefresh > 3000) refreshQuestionsSilently(); }
+function refreshOnReturn() {
+  if (!creds || document.hidden) return;
+  lastDashboardActivity = Date.now();
+  if (!autoTimer) startAutoRefresh();
+  if (Date.now() - lastQRefresh > 3000) refreshQuestionsSilently();
+}
 document.addEventListener("visibilitychange", refreshOnReturn);
 window.addEventListener("focus", refreshOnReturn);
 window.addEventListener("online", refreshOnReturn);
+function noteDashboardActivity() {
+  if (!creds || document.hidden) return;
+  lastDashboardActivity = Date.now();
+  if (!autoTimer) startAutoRefresh();
+}
+document.addEventListener("pointerdown", noteDashboardActivity, { passive: true });
+document.addEventListener("keydown", noteDashboardActivity, { passive: true });
+document.addEventListener("touchstart", noteDashboardActivity, { passive: true });
 async function refreshQuestionsSilently() {
   if (!creds || document.hidden) return;
   lastQRefresh = Date.now();
@@ -1517,7 +1509,7 @@ async function saveIntakeMessage() {
 }
 
 // ---------- تنبيهات الموظفين على تيليجرام (أدمن فقط) ----------
-let notifyState = null, notifyOpen = false, notifyCode = null, notifyPollTimer = null, NOTIFY_POLL_MS = 4000;
+let notifyState = null, notifyOpen = false, notifyCode = null, notifyPollTimer = null, NOTIFY_POLL_MS = 60000;
 try { notifyOpen = sessionStorage.getItem("notify-open") === "1"; } catch {}
 const NF_TYPE = { private: "خاص", group: "جروب", supergroup: "جروب", channel: "قناة" };
 async function loadNotify() {
@@ -1559,7 +1551,7 @@ function renderNotify() {
         <button class="ghost" id="notifyArrow" onclick="toggleNotifyPanel()" title="إظهار / إخفاء الإعدادات" style="padding:2px 10px;font-size:18px;line-height:1.4">${notifyOpen ? "▴" : "▾"}</button>
       </div></div>
     <div id="notifyDetails" style="display:${notifyOpen ? "block" : "none"}">
-      <p class="muted" style="margin:8px 0">بيوصلك رسالة على تيليجرام أول ما يجي سؤال جديد أو متابعة جديدة، حتى لو اللوحة مقفولة. مفيش رقم هاتف ولا ID عميل بيتبعت في التنبيه.</p>
+      <p class="muted" style="margin:8px 0">بيوصلك رسالة على تيليجرام أول ما يجي سؤال جديد أو متابعة جديدة، حتى لو اللوحة مقفولة. مفيش رقم هاتف ولا ID عميل بيتبعت في التنبيه. للرد من الجروب: اعمل Reply على تنبيه السؤال نفسه واكتب الإجابة كنص؛ البوت هيوصلها للعميل ويسجل الرد.</p>
       <h3 style="margin:12px 0 4px;font-size:14px">المحادثات المربوطة (حتى ${notifyState.maxChats})</h3>
       <div id="nf-chats"></div>
       <div style="margin-top:8px"><button class="ghost" id="nf-link" onclick="notifyLink()">🔗 ربط محادثة جديدة</button></div>
@@ -1570,8 +1562,8 @@ function renderNotify() {
         <label><input type="checkbox" id="nf-f" ${c.onFollowup ? "checked" : ""}> متابعة جديدة</label>
         <label><input type="checkbox" id="nf-name" ${c.showName ? "checked" : ""}> إظهار اسم العميل</label>
       </div>
-      <label class="muted">عدد حروف نص السؤال في التنبيه (من 0 إلى 300، و0 = من غير نص)</label>
-      <input id="nf-chars" type="number" min="0" max="300" step="1" value="${c.previewChars}">
+      <label class="muted">عدد حروف نص السؤال في التنبيه (من 0 إلى 1000، و0 = من غير نص)</label>
+      <input id="nf-chars" type="number" min="0" max="1000" step="1" value="${c.previewChars}">
       <label class="muted" style="margin-top:8px;display:block">أقصى عدد تنبيهات في الدقيقة (من 1 إلى 30). لو زادت بتتجمّع في رسالة واحدة «وصلت أسئلة كتير»، والأسئلة نفسها بتتسجل كلها.</label>
       <input id="nf-rate" type="number" min="1" max="30" step="1" value="${c.maxPerMinute}">
       <label class="muted" style="margin-top:8px;display:block">رابط اللوحة (لزرار «فتح اللوحة» في التنبيه)</label>
@@ -1598,7 +1590,7 @@ async function notifyToggleEnabled(on) {
 async function notifySave() {
   const err = $("nf-err"), chars = $("nf-chars").value.trim(), rate = $("nf-rate").value.trim(), url = $("nf-url").value.trim();
   err.textContent = "";
-  if (!/^\d+$/.test(chars) || +chars > 300) { err.textContent = "عدد الحروف رقم صحيح من 0 إلى 300"; return; }
+  if (!/^\d+$/.test(chars) || +chars > 1000) { err.textContent = "عدد الحروف رقم صحيح من 0 إلى 1000"; return; }
   if (!/^\d+$/.test(rate) || +rate < 1 || +rate > 30) { err.textContent = "أقصى عدد في الدقيقة رقم صحيح من 1 إلى 30"; return; }
   if (url && !/^https:\/\/\S+$/.test(url)) { err.textContent = "رابط اللوحة لازم يبدأ بـ https://"; return; }
   try {
@@ -1629,6 +1621,7 @@ async function notifyLink() {
     clearInterval(notifyPollTimer);
     notifyPollTimer = setInterval(async () => {
       if (!notifyCode || notifyCode.until < Date.now() || !$("nf-codebox")) { clearInterval(notifyPollTimer); if ($("nf-codebox")) $("nf-codebox").innerHTML = ""; notifyCode = null; return; }
+      if (document.hidden || Date.now() - lastDashboardActivity >= DASHBOARD_IDLE_MS) return;
       try {
         const st = await api("notifyGet");
         notifyState.chats = st.chats; renderNotifyChats();
@@ -1936,34 +1929,6 @@ function fmtTime(ms) {
   return new Date(ms).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" });
 }
 
-// ---------- سجل الضغطات ----------
-let pressCache = [];
-async function loadPressLog() {
-  try {
-    pressCache = (await api("presslog")).log;
-    renderPressLog();
-  } catch (e) { toast(e.message, "bad"); }
-}
-
-function cairoDate(ms) { return new Date(ms).toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }); }
-function clearPressDate() { $("pDate").value = ""; renderPressLog(); }
-function renderPressLog() {
-  const t = $("pTable");
-  const q = ($("pSearch").value || "").trim();
-  const date = $("pDate").value;
-  const rows = pressCache.filter((x) => (!q || (x.l || "").includes(q)) && (!date || cairoDate(x.t) === date));
-  if (!rows.length) { t.innerHTML = '<tr><td class="muted">مفيش ضغطات بعد</td></tr>'; return; }
-  t.innerHTML = `<tr><th>الوقت</th><th>الزرار</th><th>المكان</th></tr>` + rows.map((x) => `
-    <tr><td>${fmtTime(x.t)}</td><td>${esc(x.l || "—")}</td><td class="muted">${esc(x.p === "" ? "الرئيسية" : x.p)}</td></tr>`).join("");
-}
-
-function exportPressLog() {
-  const date = $("pDate")?.value || "كل_التواريخ";
-  const q = ($("pSearch")?.value || "").trim();
-  const rows = pressCache.filter((x) => (!q || (x.l || "").includes(q)) && (!$("pDate")?.value || cairoDate(x.t) === $("pDate").value));
-  excelDownload(`سجل_الضغطات_${date}.xls`, [["الوقت", "الزرار", "المكان"], ...rows.map((x) => [fmtTime(x.t), x.l, x.p])]);
-}
-
 function hoursTable(hours) {
   const hrs = Array.from({ length: 24 }, (_, h) => ({ h, n: Number(hours[h] || 0) }));
   const maxHr = Math.max(1, ...hrs.map((r) => r.n));
@@ -1978,28 +1943,6 @@ function usageRows(obj) {
   const max = Math.max(1, ...entries.map(([, v]) => Number(v)));
   if (!entries.length) return '<tr><td colspan="3" class="muted">لا يوجد نشاط في هذا النطاق</td></tr>';
   return entries.sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td>${esc(k.split("|")[1] || k)}</td><td>${v}</td><td style="width:35%"><div class="bar"><span style="width:${(v / max) * 100}%"></span></div></td></tr>`).join("");
-}
-async function deleteUnmatchedWord(word) {
-  if (!confirm(`تمسح الكلمة "${word}"؟`)) return;
-  try { await api("delunmatched", { ref: word }); toast("اتمسحت الكلمة", "ok"); loadStats(); }
-  catch (e) { toast(e.message, "bad"); }
-}
-async function deleteSelectedUnmatched() {
-  const words = [...document.querySelectorAll(".unmatched-check:checked")].map((x) => x.value);
-  if (!words.length) return toast("حدد كلمة واحدة على الأقل", "bad");
-  if (!confirm(`تمسح ${words.length} كلمة؟`)) return;
-  try {
-    await Promise.all(words.map((word) => api("delunmatched", { ref: word })));
-    toast("اتمسحت الكلمات المحددة", "ok"); loadStats();
-  } catch (e) { toast(e.message, "bad"); }
-}
-async function clearAllUnmatched() {
-  if (!confirm("تمسح كل الكلمات غير المتطابقة؟")) return;
-  try { await api("clearunmatched"); toast("اتمسحت كل الكلمات", "ok"); loadStats(); }
-  catch (e) { toast(e.message, "bad"); }
-}
-function toggleAllUnmatched(el) {
-  document.querySelectorAll(".unmatched-check").forEach((x) => { x.checked = el.checked; });
 }
 async function loadDailyForDate(date) {
   try {
@@ -2245,13 +2188,6 @@ async function loadStats() {
     const hoursRows = hoursTable(lastHoursView);
     const peak7 = st.peakLast7 ? `${String(st.peakLast7.hour).padStart(2, "0")}:00 (${st.peakLast7.count} ضغطة)` : "لا توجد بيانات كافية";
 
-    // الكلمات اللي ما اتطابقتش
-    let um = [];
-    try { um = (await api("unmatched")).words; lastUnmatched = um; } catch {}
-    const umRows = um.length
-      ? um.map((w) => `<tr><td><input class="unmatched-check" type="checkbox" value="${esc(w.word)}"> ${esc(w.word)}</td><td>${w.count}</td><td><button class="danger" onclick='deleteUnmatchedWord(${JSON.stringify(w.word)})'>🗑 حذف</button></td></tr>`).join("")
-      : '<tr><td colspan="3" class="muted">لسه مفيش كلمات</td></tr>';
-
     const maxD = Math.max(1, ...st.daily.map((d) => d.presses));
     const chart = st.daily.map((d) => `
       <div class="col">
@@ -2269,14 +2205,7 @@ async function loadStats() {
         <td style="width:35%"><div class="bar"><span style="width:${(v / max) * 100}%"></span></div></td></tr>`).join("");
     };
 
-    // الأزرار اللي ما اتداستش خالص في 7 أيام
-    // نعرض بس الزراير الموجودة فعلاً (المحذوف أو المتغير اسمه ما يظهرش)
     const used = labelUsage(st.pressByPath7d);
-    const usedNames = Object.keys(used);
-    const unused = allNodes().filter(({ path, node }) => path !== "" && !usedNames.includes(node.label));
-    const unusedHtml = unused.length
-      ? unused.map(({ path, node }) => `<span class="chip zero">${esc(node.label || "بدون اسم")}</span>`).join("")
-      : '<span class="muted">كل الأزرار اتداست خلال آخر 7 أيام ✅</span>';
 
     box.innerHTML = `
       <div class="row"><h2 class="sect" style="margin:0">📊 الإحصائيات العامة</h2>
@@ -2297,18 +2226,10 @@ async function loadStats() {
       <div class="card" id="buttonsCard"><div class="row"><h2 style="margin:0">أكتر الزراير استخداماً (7 أيام)</h2><div class="row" style="gap:6px"><label class="muted">يوم محدد: <input id="buttonsDate" type="date" onchange="loadButtonsForDate(this.value)" style="width:auto"></label><button class="ghost" onclick="loadButtonsForDate(\"\")">آخر 7 أيام</button><button class="ghost" onclick="exportButtons()">📥 تصدير</button></div></div>
         <p id="buttonsMode" class="muted">أكتر الزراير استخدامًا خلال آخر 7 أيام</p><table id="buttonsTable"><tr><th>الزرار</th><th>الضغطات</th><th></th></tr>${usageRows(used)}</table></div>
 
-      <div class="card"><div class="row"><h2 style="margin:0">زراير ما اتداستش (7 أيام)</h2><button class="ghost" onclick="exportUnused()">📥 تصدير</button></div>
-        <div class="chips">${unusedHtml}</div>
-        <p class="muted" style="margin:10px 0 0">لو زرار مش بيتداس خالص، ممكن تراجع محتواه أو تشيله.</p></div>
-
       <div class="card" id="hoursCard"><div class="row"><h2 style="margin:0">🕒 أوقات الذروة</h2><div class="row" style="gap:6px"><label class="muted">يوم محدد: <input id="peakDate" type="date" onchange="loadHoursForDate(this.value)" style="width:auto"></label><button class="ghost" onclick="loadHoursForDate("")">الإجمالي</button><button class="ghost" onclick="exportHours()">📥 Excel</button></div></div>
         <p id="hoursMode" class="muted">الإجمالي التاريخي لكل البيانات المتاحة</p>
         <table id="hoursTable"><tr><th>الساعة</th><th>الضغطات</th><th></th></tr>${hoursRows}</table>
         <p class="muted" style="margin:10px 0 0">الساعات بتوقيت القاهرة، والبيانات محفوظة تاريخيًا.</p></div>
-
-      <div class="card" id="unmatchedCard"><div class="row"><h2 style="margin:0">🔤 أكتر الكلمات اللي ما اتطابقتش</h2><div class="row" style="gap:6px"><button class="ghost" onclick="exportUnmatched()">📥 تصدير</button><button class="danger" onclick="deleteSelectedUnmatched()">🗑 حذف المحدد</button><button class="danger" onclick="clearAllUnmatched()">🧹 حذف الكل</button></div></div>
-        <table><tr><th><input type="checkbox" onchange="toggleAllUnmatched(this)" aria-label="تحديد الكل"> الكلمة</th><th>عدد مرات الكتابة</th><th>إجراء</th></tr>${umRows}</table>
-        <p class="muted" style="margin:10px 0 0">لو كلمة متكررة وملهاش رد، ضيفها في 🔑 كلمات الاستدعاء للزرار المناسب.</p></div>
 `;
     mainKpisDefault = $("mainKpis").innerHTML;
     makeStatsCollapsible();
@@ -2350,7 +2271,6 @@ function makeCollapsible(cardId, key) {
 function makeStatsCollapsible() {
   makeCollapsible("buttonsCard", "buttons");
   makeCollapsible("hoursCard", "hours");
-  makeCollapsible("unmatchedCard", "unmatched");
 }
 
 // ---------- سجل النسخ ----------
